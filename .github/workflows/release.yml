@@ -1,0 +1,36 @@
+name: Release on version bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub release from manifest version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(jq -r '.version' custom_components/kokoro_tts/manifest.json)
+          if [ -z "$v" ] || [ "$v" = "null" ]; then
+            echo "No version in manifest.json"; exit 1
+          fi
+          if gh release view "$v" >/dev/null 2>&1; then
+            echo "Release $v already exists - skipping."
+            exit 0
+          fi
+          # Use the matching CHANGELOG section as notes; fall back to auto-generated.
+          awk -v ver="$v" 'index($0, "## " ver)==1 {f=1; next} /^## / && f {exit} f {print}' \
+            CHANGELOG.md > notes.md || true
+          if [ -s notes.md ]; then
+            gh release create "$v" --title "$v" --target "$GITHUB_SHA" --notes-file notes.md
+          else
+            gh release create "$v" --title "$v" --target "$GITHUB_SHA" --generate-notes
+          fi
+          echo "Created release $v"
