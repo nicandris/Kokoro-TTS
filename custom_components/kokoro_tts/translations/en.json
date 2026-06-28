@@ -20,6 +20,9 @@
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
           "sample_rate": "Sample rate (Hz)"
+        },
+        "data_description": {
+          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server."
         }
       },
       "reauth_confirm": {
@@ -60,6 +63,9 @@
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
           "sample_rate": "Sample rate (Hz)"
+        },
+        "data_description": {
+          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server."
         }
       }
     },

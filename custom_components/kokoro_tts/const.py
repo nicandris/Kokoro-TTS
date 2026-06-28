@@ -24,8 +24,10 @@ DEFAULT_LANGUAGE = "All Languages"
 DEFAULT_SEX = "All"
 DEFAULT_SPEED = 1.0
 DEFAULT_FORMAT = "mp3"
-DEFAULT_SAMPLE_RATE = 24000
 DEFAULT_VOLUME_MULTIPLIER = 1.0
+
+# Kokoro FastAPI always outputs 24 kHz; shown read-only in the UI and never sent.
+FIXED_SAMPLE_RATE = 24000
 
 # Voice mapping: technical_name -> (language, gender, display_name)
 PERSONA_MAPPINGS = {
@@ -137,6 +139,20 @@ LANGUAGE_CODE_MAP: dict[str, str] = {
     "Brazilian Portuguese": "p",
 }
 
+# Map Kokoro single-letter lang codes to Home Assistant locale codes, so the TTS
+# entity advertises the language of its configured voice instead of always "en".
+LANG_CODE_TO_HA_LOCALE: dict[str, str] = {
+    "a": "en",  # American English
+    "b": "en",  # British English
+    "j": "ja",  # Japanese
+    "z": "zh",  # Mandarin Chinese
+    "e": "es",  # Spanish
+    "f": "fr",  # French
+    "h": "hi",  # Hindi
+    "i": "it",  # Italian
+    "p": "pt",  # Brazilian Portuguese
+}
+
 # Consolidated defaults dictionary
 DEFAULTS: dict[str, Any] = {
     CONF_API_KEY: DEFAULT_API_KEY,
@@ -146,6 +162,5 @@ DEFAULTS: dict[str, Any] = {
     CONF_SEX: DEFAULT_SEX,
     CONF_SPEED: DEFAULT_SPEED,
     CONF_FORMAT: DEFAULT_FORMAT,
-    CONF_SAMPLE_RATE: DEFAULT_SAMPLE_RATE,
     CONF_VOLUME_MULTIPLIER: DEFAULT_VOLUME_MULTIPLIER,
 }

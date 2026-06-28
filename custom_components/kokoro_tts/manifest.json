@@ -5,13 +5,10 @@
         "@beecho01"
     ],
     "config_flow": true,
-    "dependencies": [
-        "http",
-        "frontend"
-    ],
-    "documentation": "https://github.com/beecho01/kokoro-tts",
-    "iot_class": "local_push",
-    "issue_tracker": "https://github.com/beecho01/kokoro-tts/issues",
+    "documentation": "https://github.com/beecho01/Kokoro-TTS",
+    "integration_type": "service",
+    "iot_class": "local_polling",
+    "issue_tracker": "https://github.com/beecho01/Kokoro-TTS/issues",
     "requirements": [],
     "version": "2026.05.23"
 }
