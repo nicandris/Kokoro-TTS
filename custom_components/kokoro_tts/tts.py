@@ -10,6 +10,8 @@ import logging
 from homeassistant.components.tts.entity import TextToSpeechEntity, TtsAudioType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_BASE_URL,
@@ -18,22 +20,21 @@ from .const import (
     CONF_LANGUAGE,
     CONF_MODEL,
     CONF_PERSONA,
-    CONF_SAMPLE_RATE,
     CONF_SPEED,
     DEFAULT_API_KEY,
     DEFAULT_FORMAT,
     DEFAULT_MODEL,
-    DEFAULT_SAMPLE_RATE,
     DEFAULT_SPEED,
     DEFAULT_VOLUME_MULTIPLIER,
     DOMAIN,
+    LANG_CODE_TO_HA_LOCALE,
     LANGUAGE_CODE_MAP,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 # Per-call TTS options exposed to HA services
-SUPPORTED_OPTIONS = ["persona", "speed", "format", "sample_rate", "volume_multiplier"]
+SUPPORTED_OPTIONS = ["persona", "speed", "format", "volume_multiplier"]
 
 # Default entity name
 DEFAULT_NAME = "kokoro"
@@ -49,17 +50,18 @@ async def async_setup_entry(
     # Options override data
     merged = {**config_data, **options}
 
-    name = merged.get("name", DEFAULT_NAME)
+    # No "name" field is collected in the config flow, so use the default.
+    name = DEFAULT_NAME
     base_url = merged[CONF_BASE_URL].rstrip("/")
     api_key = merged.get(CONF_API_KEY, DEFAULT_API_KEY) or DEFAULT_API_KEY
     model = merged.get(CONF_MODEL, DEFAULT_MODEL)
     persona = merged.get(CONF_PERSONA)
     speed = float(merged.get(CONF_SPEED, DEFAULT_SPEED))
     fmt = (merged.get(CONF_FORMAT, DEFAULT_FORMAT) or DEFAULT_FORMAT).lower()
-    sample_rate = int(merged.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE))
     language = merged.get(CONF_LANGUAGE)
 
     entity = KokoroTTSEntity(
+        unique_id=config_entry.entry_id,
         name=name,
         base_url=base_url,
         api_key=api_key,
@@ -67,7 +69,6 @@ async def async_setup_entry(
         persona=persona,
         speed=speed,
         fmt=fmt,
-        sample_rate=sample_rate,
         language=language,
     )
     async_add_entities([entity])
@@ -78,6 +79,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
     def __init__(
         self,
+        unique_id: str,
         name: str,
         base_url: str,
         api_key: str,
@@ -85,25 +87,27 @@ class KokoroTTSEntity(TextToSpeechEntity):
         persona: str | None,
         speed: float,
         fmt: str,
-        sample_rate: int,
         language: str | None = None,
     ) -> None:
         """Initialize the TTS entity."""
         super().__init__()
         self._attr_name = name
-        self._attr_unique_id = f"kokoro_tts_{name}"
+        # Tie the unique_id to the config entry so multiple servers don't collide.
+        self._attr_unique_id = unique_id
         self._base_url = base_url
         self._api_key = api_key
         self._model = model
         self._persona = persona
         self._speed = speed
         self._fmt = fmt
-        self._sample_rate = sample_rate
         self._language = language
 
-        # Required TTS entity attributes
-        self._attr_default_language = "en"
-        self._attr_supported_languages = ["en"]
+        # Advertise the language of the configured voice rather than always
+        # "en", so Home Assistant routes the right locale to this entity.
+        lang_code = self._get_lang_code(persona)
+        locale = LANG_CODE_TO_HA_LOCALE.get(lang_code, "en") if lang_code else "en"
+        self._attr_default_language = locale
+        self._attr_supported_languages = [locale]
         self._attr_supported_options = SUPPORTED_OPTIONS
 
     @staticmethod
@@ -166,8 +170,8 @@ class KokoroTTSEntity(TextToSpeechEntity):
         if lang_code:
             payload["lang_code"] = lang_code
 
-        if volume_multiplier != 1.0:
-            payload["volume_multiplier"] = volume_multiplier
+        # Always send it so an explicit 1.0 can override a server-side default.
+        payload["volume_multiplier"] = volume_multiplier
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key and self._api_key not in ("x", "not-needed", ""):
@@ -176,46 +180,55 @@ class KokoroTTSEntity(TextToSpeechEntity):
         url = f"{self._base_url}/v1/audio/speech"
         timeout = aiohttp.ClientTimeout(total=60, connect=10)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    _LOGGER.warning(
-                        "Kokoro TTS API error %d: %s", response.status, error_text[:200]
+        # Reuse Home Assistant's shared aiohttp session (pooled, not closed here).
+        session = async_get_clientsession(self.hass)
+        async with session.post(
+            url, json=payload, headers=headers, timeout=timeout
+        ) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                _LOGGER.warning(
+                    "Kokoro TTS API error %d: %s", response.status, error_text[:200]
+                )
+                # Report 401s with HA's auth-failure exception (correct type,
+                # and lets HA drive the reauth flow for this entry).
+                if response.status == 401:
+                    raise ConfigEntryAuthFailed(
+                        "Authentication failed - check your API key"
                     )
-                    error_msg = self._handle_http_error(response.status, error_text)
-                    raise RuntimeError(error_msg)
+                error_msg = self._handle_http_error(response.status, error_text)
+                raise RuntimeError(error_msg)
 
-                content_type = response.headers.get("content-type", "").lower()
+            content_type = response.headers.get("content-type", "").lower()
 
-                if "application/json" in content_type:
-                    data = await response.json()
-                    if isinstance(data, dict):
-                        if "audio" in data:
-                            audio_bytes = base64.b64decode(data["audio"])
-                        elif "download_url" in data:
-                            download_url = data["download_url"]
-                            async with session.get(
-                                download_url,
-                                timeout=aiohttp.ClientTimeout(total=30),
-                            ) as dl_resp:
-                                if dl_resp.status != 200:
-                                    raise RuntimeError(
-                                        f"Failed to download audio: HTTP {dl_resp.status}"
-                                    )
-                                audio_bytes = await dl_resp.read()
-                        else:
-                            raise RuntimeError(
-                                f"JSON response missing audio fields: {list(data.keys())}"
-                            )
+            if "application/json" in content_type:
+                data = await response.json()
+                if isinstance(data, dict):
+                    if "audio" in data:
+                        audio_bytes = base64.b64decode(data["audio"])
+                    elif "download_url" in data:
+                        download_url = data["download_url"]
+                        async with session.get(
+                            download_url,
+                            timeout=aiohttp.ClientTimeout(total=30),
+                        ) as dl_resp:
+                            if dl_resp.status != 200:
+                                raise RuntimeError(
+                                    f"Failed to download audio: HTTP {dl_resp.status}"
+                                )
+                            audio_bytes = await dl_resp.read()
                     else:
-                        raise RuntimeError("Unexpected JSON response type")
+                        raise RuntimeError(
+                            f"JSON response missing audio fields: {list(data.keys())}"
+                        )
                 else:
-                    # Binary audio response (most common)
-                    audio_bytes = await response.read()
+                    raise RuntimeError("Unexpected JSON response type")
+            else:
+                # Binary audio response (most common)
+                audio_bytes = await response.read()
 
-                if not audio_bytes:
-                    raise RuntimeError("Received empty audio data")
+            if not audio_bytes:
+                raise RuntimeError("Received empty audio data")
 
-                _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
-                return fmt, audio_bytes
+            _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
+            return fmt, audio_bytes

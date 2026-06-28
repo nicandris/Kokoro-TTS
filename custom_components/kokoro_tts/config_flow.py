@@ -26,15 +26,19 @@ from .const import (
     CONF_SPEED,
     DEFAULTS,
     DOMAIN,
+    FIXED_SAMPLE_RATE,
+    LANGUAGE_CODE_MAP,
     LANGUAGE_OPTIONS,
     PERSONA_MAPPINGS,
     SEX_OPTIONS,
 )
 
+# Reverse of LANGUAGE_CODE_MAP: first-letter code -> language display name.
+_CODE_TO_LANGUAGE = {code: lang for lang, code in LANGUAGE_CODE_MAP.items()}
+
 _LOGGER = logging.getLogger(__name__)
 
 _FORMAT_OPTIONS = ["mp3", "wav", "opus", "flac", "pcm"]
-_SAMPLE_RATE_OPTIONS = ["22050", "24000", "44100"]
 
 
 # ---------------------------------------------------------------------------
@@ -66,21 +70,25 @@ def get_persona_display_name(
     return f"{name} ({language}, {sex})"
 
 
-def get_technical_persona_name(display_name: str) -> str:
-    """Convert display name back to technical persona name."""
-    # Exact name match first (most common when both filters active)
-    for tech_name, (_, _, name) in PERSONA_MAPPINGS.items():
-        if display_name == name:
-            return tech_name
-    # Then try formatted variants
-    for tech_name, (language, sex, name) in PERSONA_MAPPINGS.items():
-        if display_name in (
-            f"{name} ({sex})",
-            f"{name} ({language})",
-            f"{name} ({language}, {sex})",
-        ):
-            return tech_name
-    return display_name
+def derive_persona_info(code: str) -> tuple[str, str, str] | None:
+    """Best-effort (language, sex, display_name) for a persona not in the static map.
+
+    Kokoro voice codes follow ``<lang><sex>_<name>`` (e.g. ``af_heart`` ->
+    American English / Female / "Heart"). This lets voices the server reports
+    but that aren't in PERSONA_MAPPINGS still be classified and filtered,
+    instead of only appearing when no filters are active.
+    """
+    if "_" not in code:
+        return None
+    prefix, _, raw_name = code.partition("_")
+    if len(prefix) < 2 or not raw_name:
+        return None
+    language = _CODE_TO_LANGUAGE.get(prefix[0].lower())
+    sex = {"f": "Female", "m": "Male"}.get(prefix[1].lower())
+    if not language or not sex:
+        return None
+    display = raw_name.replace("_", " ").title()
+    return language, sex, display
 
 
 def filter_personas_by_language_and_sex(
@@ -92,33 +100,47 @@ def filter_personas_by_language_and_sex(
     sex_all = selected_sex in ("All", "", None)
 
     for persona in personas:
-        if persona in PERSONA_MAPPINGS:
-            language, sex, _ = PERSONA_MAPPINGS[persona]
+        info = PERSONA_MAPPINGS.get(persona) or derive_persona_info(persona)
+        if info is not None:
+            language, sex, _ = info
             if (lang_all or language == selected_language) and (
                 sex_all or sex == selected_sex
             ):
                 filtered.append(persona)
         elif lang_all and sex_all:
-            # Include unmapped personas only when no filters active
+            # Truly unclassifiable codes: only when no filters active
             filtered.append(persona)
     return filtered
 
 
-def get_persona_options_for_language_and_sex(
+def get_persona_select_options(
     personas: list[str], selected_language: str, selected_sex: str
-) -> list[str]:
-    """Get user-friendly persona options for specific language and sex."""
+) -> list[dict[str, str]]:
+    """Build {value, label} options for the persona selector.
+
+    The option *value* is the technical code (e.g. ``af_heart``) and the
+    *label* is the friendly display name. Using the code as the value means
+    voices that share a display name across languages (e.g. ``jf_alpha`` and
+    ``hf_alpha`` both shown as "Alpha") no longer collide when reverse-mapped
+    on save — the exact selected code is stored directly.
+    """
     filtered = filter_personas_by_language_and_sex(personas, selected_language, selected_sex)
-    options = sorted(
-        get_persona_display_name(p, selected_language, selected_sex) for p in filtered
-    )
+    options = [
+        {"value": code, "label": get_persona_display_name(code, selected_language, selected_sex)}
+        for code in filtered
+    ]
+    options.sort(key=lambda option: option["label"])
     if not options:
         if selected_language != "All Languages" and selected_sex != "All":
-            options = [f"No {selected_sex.lower()} personas available for {selected_language}"]
+            label = f"No {selected_sex.lower()} personas available for {selected_language}"
         elif selected_language != "All Languages":
-            options = [f"No personas available for {selected_language}"]
+            label = f"No personas available for {selected_language}"
         elif selected_sex != "All":
-            options = [f"No {selected_sex.lower()} personas available"]
+            label = f"No {selected_sex.lower()} personas available"
+        else:
+            label = "No personas available"
+        # Empty value so this placeholder fails the "persona selected" check.
+        options = [{"value": "", "label": label}]
     return options
 
 
@@ -151,7 +173,7 @@ async def _discover_models_and_personas(
                                 for item in data["data"]
                                 if isinstance(item, dict) and item.get("id")
                             ]
-            except Exception:
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 _LOGGER.debug("Failed to discover models from %s/v1/models", base_url)
 
             # Discover personas from /v1/audio/voices
@@ -173,9 +195,9 @@ async def _discover_models_and_personas(
                                 personas.append(voice)
                             elif isinstance(voice, dict) and voice.get("id"):
                                 personas.append(str(voice["id"]))
-            except Exception:
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 _LOGGER.debug("Failed to discover personas from %s/v1/audio/voices", base_url)
-    except Exception:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         _LOGGER.debug("Error in discovery session for %s", base_url)
 
     # Fallback to static mappings if API discovery failed
@@ -214,7 +236,7 @@ async def _test_connection(base_url: str, api_key: str) -> dict[str, str]:
                 return {CONF_BASE_URL: "cannot_connect"}
             except asyncio.TimeoutError:
                 return {CONF_BASE_URL: "timeout"}
-    except Exception:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return {CONF_BASE_URL: "cannot_connect"}
     return {}
 
@@ -286,26 +308,29 @@ def _details_schema(
         {"select": {"options": SEX_OPTIONS, "mode": "dropdown"}}
     )
 
-    # Persona selector (filtered)
+    # Persona selector (filtered). Option values are technical codes.
     if personas:
-        persona_options = get_persona_options_for_language_and_sex(
+        persona_options = get_persona_select_options(
             personas, selected_language, selected_sex
         )
-        current_persona = ui.get(CONF_PERSONA, DEFAULTS[CONF_PERSONA])
-        if current_persona is None:
-            current_persona_display = ""
-        else:
-            current_persona_display = get_persona_display_name(
-                current_persona, selected_language, selected_sex
+        current_persona = ui.get(CONF_PERSONA, DEFAULTS[CONF_PERSONA]) or ""
+        # Ensure the currently-selected code is present as an option.
+        if current_persona and not any(
+            option["value"] == current_persona for option in persona_options
+        ):
+            persona_options.append(
+                {
+                    "value": current_persona,
+                    "label": get_persona_display_name(
+                        current_persona, selected_language, selected_sex
+                    ),
+                }
             )
-        # Ensure current persona is in the list
-        if current_persona and current_persona_display and current_persona_display not in persona_options:
-            persona_options.append(current_persona_display)
 
-        schema[vol.Optional(CONF_PERSONA, default=current_persona_display)] = selector.selector(
+        schema[vol.Optional(CONF_PERSONA, default=current_persona)] = selector.selector(
             {
                 "select": {
-                    "options": sorted(persona_options) if persona_options else ["No personas available"],
+                    "options": persona_options,
                     "mode": "dropdown",
                     "custom_value": True,
                 }
@@ -325,13 +350,11 @@ def _details_schema(
         vol.Optional(CONF_FORMAT, default=ui.get(CONF_FORMAT, DEFAULTS[CONF_FORMAT]))
     ] = selector.selector({"select": {"options": _FORMAT_OPTIONS, "mode": "dropdown"}})
 
-    # Sample rate dropdown
-    default_sr = ui.get(CONF_SAMPLE_RATE, DEFAULTS[CONF_SAMPLE_RATE])
-    if isinstance(default_sr, int):
-        default_sr = str(default_sr)
-    schema[vol.Optional(CONF_SAMPLE_RATE, default=default_sr)] = selector.selector(
-        {"select": {"options": _SAMPLE_RATE_OPTIONS, "mode": "dropdown"}}
-    )
+    # Sample rate: read-only. Kokoro FastAPI always outputs 24 kHz, so this is
+    # surfaced for transparency but cannot be changed (and is never sent).
+    schema[
+        vol.Optional(CONF_SAMPLE_RATE, default=str(FIXED_SAMPLE_RATE))
+    ] = selector.selector({"text": {"read_only": True}})
 
     return vol.Schema(schema)
 
@@ -354,7 +377,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         """Return the options flow."""
-        return KokoroOptionsFlow(config_entry)
+        return KokoroOptionsFlow()
 
     async def async_step_user(self, user_input: dict | None = None):
         """Handle base connection step."""
@@ -373,7 +396,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     p = urlparse(base)
                     if not p.hostname:
                         errors[CONF_BASE_URL] = "invalid_base_url"
-                except Exception:
+                except ValueError:
                     errors[CONF_BASE_URL] = "invalid_base_url"
 
             if not errors:
@@ -418,13 +441,6 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 schema = _details_schema(models, personas, user_input)
                 return self.async_show_form(step_id="details", data_schema=schema)
 
-            # Convert sample_rate to int
-            if CONF_SAMPLE_RATE in user_input and isinstance(user_input[CONF_SAMPLE_RATE], str):
-                try:
-                    user_input[CONF_SAMPLE_RATE] = int(user_input[CONF_SAMPLE_RATE])
-                except ValueError:
-                    pass
-
             # Validate persona selection
             selected_persona = user_input.get(CONF_PERSONA)
             if not selected_persona or not str(selected_persona).strip():
@@ -434,10 +450,8 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors={CONF_PERSONA: "persona_required"},
                 )
 
-            # Convert persona display name back to technical name
-            user_input[CONF_PERSONA] = get_technical_persona_name(user_input[CONF_PERSONA])
-
-            # Merge base info with details
+            # CONF_PERSONA is already the technical code (the selector option
+            # value), so no display-name reverse-mapping is needed.
             data = {**self._base_info, **user_input}
 
             # Create entry with unique ID
@@ -517,10 +531,6 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class KokoroOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Kokoro TTS."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self._entry = config_entry
-
     async def async_step_init(self, user_input: dict | None = None):
         """Handle options step with dynamic discovery."""
         if user_input is not None:
@@ -532,16 +542,16 @@ class KokoroOptionsFlow(config_entries.OptionsFlow):
 
             if not has_persona:
                 # Re-render with updated filters
-                data = {**self._entry.data, **(self._entry.options or {})}
+                data = {**self.config_entry.data, **(self.config_entry.options or {})}
                 data.pop(CONF_BASE_URL, None)
                 form_data = {**data, **user_input}
 
-                base_url = self._entry.data[CONF_BASE_URL]
-                api_key = self._entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+                base_url = self.config_entry.data[CONF_BASE_URL]
+                api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
                 models, personas = [], []
                 try:
                     models, personas = await _discover_models_and_personas(base_url, api_key)
-                except Exception:
+                except (aiohttp.ClientError, asyncio.TimeoutError):
                     pass
 
                 return self.async_show_form(
@@ -549,25 +559,18 @@ class KokoroOptionsFlow(config_entries.OptionsFlow):
                     data_schema=_details_schema(models, personas, form_data),
                 )
 
-            # Convert sample_rate to int
-            if CONF_SAMPLE_RATE in user_input and isinstance(user_input[CONF_SAMPLE_RATE], str):
-                try:
-                    user_input[CONF_SAMPLE_RATE] = int(user_input[CONF_SAMPLE_RATE])
-                except ValueError:
-                    pass
-
             # Validate persona
             selected_persona = user_input.get(CONF_PERSONA)
             if not selected_persona or not str(selected_persona).strip():
-                data = {**self._entry.data, **(self._entry.options or {})}
+                data = {**self.config_entry.data, **(self.config_entry.options or {})}
                 data.pop(CONF_BASE_URL, None)
                 form_data = {**data, **user_input}
 
-                base_url = self._entry.data[CONF_BASE_URL]
-                api_key = self._entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+                base_url = self.config_entry.data[CONF_BASE_URL]
+                api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
                 try:
                     models, personas = await _discover_models_and_personas(base_url, api_key)
-                except Exception:
+                except (aiohttp.ClientError, asyncio.TimeoutError):
                     models, personas = [], []
 
                 return self.async_show_form(
@@ -576,30 +579,21 @@ class KokoroOptionsFlow(config_entries.OptionsFlow):
                     errors={CONF_PERSONA: "persona_required"},
                 )
 
-            # Convert persona display name back to technical name
-            user_input[CONF_PERSONA] = get_technical_persona_name(user_input[CONF_PERSONA])
-
+            # CONF_PERSONA is already the technical code (the selector value).
             return self.async_create_entry(title="", data=user_input)
 
-        # Initial form display
-        data = {**self._entry.data, **(self._entry.options or {})}
+        # Initial form display. The stored CONF_PERSONA is the technical code,
+        # which is exactly what the selector uses as its option value/default.
+        data = {**self.config_entry.data, **(self.config_entry.options or {})}
         base_url = data.pop(CONF_BASE_URL, None)
-
-        # Convert stored technical persona name to display name
-        if CONF_PERSONA in data:
-            current_language = data.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
-            current_sex = data.get(CONF_SEX, DEFAULTS[CONF_SEX])
-            data[CONF_PERSONA] = get_persona_display_name(
-                data[CONF_PERSONA], current_language, current_sex
-            )
 
         # Discover models/personas
         models, personas = [], []
         if base_url:
-            api_key = self._entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+            api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
             try:
                 models, personas = await _discover_models_and_personas(base_url, api_key)
-            except Exception:
+            except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
 
         return self.async_show_form(
