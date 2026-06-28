@@ -18,8 +18,7 @@
           "sex": "Sex",
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
-          "format": "Audio format",
-          "sample_rate": "Sample rate (Hz)"
+          "format": "Audio format"
         }
       },
       "reauth_confirm": {
@@ -58,8 +57,7 @@
           "sex": "Sex",
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
-          "format": "Audio format",
-          "sample_rate": "Sample rate (Hz)"
+          "format": "Audio format"
         }
       }
     },

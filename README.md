@@ -103,7 +103,6 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | `persona` | Voice persona/character | *Required* | Auto-discovered from server |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 - 4.0 |
 | `format` | Audio format | `"mp3"` | mp3, wav, opus, flac, pcm |
-| `sample_rate` | Audio sample rate | `24000` | 22050, 24000, 44100 |
 
 ### 👨👩 Personas
 
@@ -131,7 +130,7 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | American English 🇺🇸 | Male   | Santa     | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/am_santa.mp3) | am_santa |
 | British English 🇬🇧  | Female | Alice     | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bf_alice.mp3) | bf_alice |
 | British English 🇬🇧  | Female | Emma      | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bf_emma.mp3) | bf_emma |
-| British English 🇬🇧  | Female | Isabella  | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bf_isabella.mp3) | bf_isabella |
+| British English 🇬🇧  | Female | Isabella  | _(no preview)_ | bf_isabella |
 | British English 🇬🇧  | Female | Lily      | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bf_lily.mp3) | bf_lily |
 | British English 🇬🇧  | Male   | Daniel    | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bm_daniel.mp3) | bm_daniel |
 | British English 🇬🇧  | Male   | Fable     | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/bm_fable.mp3) | bm_fable |
@@ -180,7 +179,6 @@ The integration can be configured through Home Assistant's UI with automatic dis
    - **Voice/Persona**: Select from filtered list of available personas
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
    - **Format**: Audio format (mp3, wav, opus, flac, pcm)
-   - **Sample Rate**: Audio sample rate (22050, 24000, 44100 Hz)
 
 > **Changing options?** Any changes made via `Settings` → `Devices & Services` → `Configure` take effect immediately — no Home Assistant restart is required.
 
@@ -254,7 +252,6 @@ target:
 | `persona` | Voice persona code | Config default | Any discovered persona |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 – 4.0 |
 | `format` | Audio format | `mp3` | mp3, wav, opus, flac, pcm |
-| `sample_rate` | Audio sample rate (Hz) | `24000` | 22050, 24000, 44100 |
 | `volume_multiplier` | Volume multiplier | `1.0` | Any positive float |
 
 ---
