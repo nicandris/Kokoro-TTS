@@ -13,6 +13,7 @@ CONF_LANGUAGE = "language"
 CONF_SEX = "sex"
 CONF_SPEED = "speed"
 CONF_FORMAT = "format"
+CONF_SAMPLE_RATE = "sample_rate"
 CONF_VOLUME_MULTIPLIER = "volume_multiplier"
 
 # Default values
@@ -24,6 +25,9 @@ DEFAULT_SEX = "All"
 DEFAULT_SPEED = 1.0
 DEFAULT_FORMAT = "mp3"
 DEFAULT_VOLUME_MULTIPLIER = 1.0
+
+# Kokoro FastAPI always outputs 24 kHz; shown read-only in the UI and never sent.
+FIXED_SAMPLE_RATE = 24000
 
 # Voice mapping: technical_name -> (language, gender, display_name)
 PERSONA_MAPPINGS = {

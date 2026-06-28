@@ -21,10 +21,12 @@ from .const import (
     CONF_LANGUAGE,
     CONF_MODEL,
     CONF_PERSONA,
+    CONF_SAMPLE_RATE,
     CONF_SEX,
     CONF_SPEED,
     DEFAULTS,
     DOMAIN,
+    FIXED_SAMPLE_RATE,
     LANGUAGE_CODE_MAP,
     LANGUAGE_OPTIONS,
     PERSONA_MAPPINGS,
@@ -347,6 +349,12 @@ def _details_schema(
     schema[
         vol.Optional(CONF_FORMAT, default=ui.get(CONF_FORMAT, DEFAULTS[CONF_FORMAT]))
     ] = selector.selector({"select": {"options": _FORMAT_OPTIONS, "mode": "dropdown"}})
+
+    # Sample rate: read-only. Kokoro FastAPI always outputs 24 kHz, so this is
+    # surfaced for transparency but cannot be changed (and is never sent).
+    schema[
+        vol.Optional(CONF_SAMPLE_RATE, default=str(FIXED_SAMPLE_RATE))
+    ] = selector.selector({"text": {"read_only": True}})
 
     return vol.Schema(schema)
 
