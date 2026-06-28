@@ -2,6 +2,10 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.06.28.4 — Default volume control
+
+- Add a configurable default volume multiplier in the setup and options menus (slider). Boosts or attenuates output loudness for every message; still overridable per call via `volume_multiplier`.
+
 ## 2026.06.28.3 — Tests & CI
 
 - Add a unit-test suite (persona helpers, TTS entity, async request flow, options-reload listener) with Home Assistant stubbed so it runs without HA installed.

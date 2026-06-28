@@ -21,6 +21,7 @@ from .const import (
     CONF_MODEL,
     CONF_PERSONA,
     CONF_SPEED,
+    CONF_VOLUME_MULTIPLIER,
     DEFAULT_API_KEY,
     DEFAULT_FORMAT,
     DEFAULT_MODEL,
@@ -59,6 +60,7 @@ async def async_setup_entry(
     speed = float(merged.get(CONF_SPEED, DEFAULT_SPEED))
     fmt = (merged.get(CONF_FORMAT, DEFAULT_FORMAT) or DEFAULT_FORMAT).lower()
     language = merged.get(CONF_LANGUAGE)
+    volume_multiplier = float(merged.get(CONF_VOLUME_MULTIPLIER, DEFAULT_VOLUME_MULTIPLIER))
 
     entity = KokoroTTSEntity(
         unique_id=config_entry.entry_id,
@@ -70,6 +72,7 @@ async def async_setup_entry(
         speed=speed,
         fmt=fmt,
         language=language,
+        volume_multiplier=volume_multiplier,
     )
     async_add_entities([entity])
 
@@ -88,6 +91,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         speed: float,
         fmt: str,
         language: str | None = None,
+        volume_multiplier: float = DEFAULT_VOLUME_MULTIPLIER,
     ) -> None:
         """Initialize the TTS entity."""
         super().__init__()
@@ -101,6 +105,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         self._speed = speed
         self._fmt = fmt
         self._language = language
+        self._volume_multiplier = volume_multiplier
 
         # Advertise the language of the configured voice rather than always
         # "en", so Home Assistant routes the right locale to this entity.
@@ -152,7 +157,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         persona = opts.get("persona", opts.get("voice", self._persona))
         speed = float(opts.get("speed", self._speed))
         fmt = (opts.get("format", self._fmt) or self._fmt).lower()
-        volume_multiplier = float(opts.get("volume_multiplier", DEFAULT_VOLUME_MULTIPLIER))
+        volume_multiplier = float(opts.get("volume_multiplier", self._volume_multiplier))
 
         # Build API payload
         payload: dict[str, Any] = {

@@ -103,6 +103,7 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | `persona` | Voice persona/character | *Required* | Auto-discovered from server |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 - 4.0 |
 | `format` | Audio format | `"mp3"` | mp3, wav, opus, flac, pcm |
+| `volume_multiplier` | Default output volume multiplier | `1.0` | 0.1 – 5.0 |
 | `sample_rate` | Output sample rate — **read-only**, fixed by the server | `24000` | Fixed at 24000 Hz |
 
 ### 👨👩 Personas
@@ -180,6 +181,7 @@ The integration can be configured through Home Assistant's UI with automatic dis
    - **Voice/Persona**: Select from filtered list of available personas
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
    - **Format**: Audio format (mp3, wav, opus, flac, pcm)
+   - **Default Volume**: Output volume multiplier (1.0 = unchanged; raise for louder TTS).
    - **Sample Rate**: Read-only. Kokoro FastAPI always outputs 24000 Hz, so it can't be changed.
 
 > **Changing options?** Any changes made via `Settings` → `Devices & Services` → `Configure` take effect immediately — no Home Assistant restart is required.

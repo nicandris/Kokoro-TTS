@@ -43,14 +43,15 @@ class _FakeSession:
         self._response = response
 
     def post(self, *args, **kwargs):
+        self.last_json = kwargs.get("json")
         return self._response
 
     def get(self, *args, **kwargs):
         return self._response
 
 
-def _entity():
-    entity = KokoroTTSEntity(
+def _entity(**overrides):
+    kwargs = dict(
         unique_id="entry-abc",
         name="kokoro",
         base_url="http://host:8880",
@@ -61,6 +62,8 @@ def _entity():
         fmt="mp3",
         language=None,
     )
+    kwargs.update(overrides)
+    entity = KokoroTTSEntity(**kwargs)
     # self.hass is only handed to the (patched) async_get_clientsession.
     entity.hass = object()
     return entity
@@ -96,3 +99,19 @@ async def test_get_tts_audio_empty_message_rejected():
     # Validated before any network call, so no session patching needed.
     with pytest.raises(ValueError):
         await _entity().async_get_tts_audio("   ", "en")
+
+
+async def test_default_volume_multiplier_applied(monkeypatch):
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity(volume_multiplier=2.0).async_get_tts_audio("hi", "en")
+    assert session.last_json["volume_multiplier"] == 2.0
+
+
+async def test_per_call_volume_overrides_default(monkeypatch):
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity(volume_multiplier=2.0).async_get_tts_audio(
+        "hi", "en", {"volume_multiplier": 3.0}
+    )
+    assert session.last_json["volume_multiplier"] == 3.0
