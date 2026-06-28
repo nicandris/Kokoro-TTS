@@ -19,10 +19,12 @@
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
-          "sample_rate": "Sample rate (Hz)"
+          "sample_rate": "Sample rate (Hz)",
+          "volume_multiplier": "Default volume"
         },
         "data_description": {
-          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server."
+          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server.",
+          "volume_multiplier": "Multiplies output loudness for every message (1.0 = unchanged, 2.0 = louder). Can be overridden per call."
         }
       },
       "reauth_confirm": {
@@ -62,10 +64,12 @@
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
-          "sample_rate": "Sample rate (Hz)"
+          "sample_rate": "Sample rate (Hz)",
+          "volume_multiplier": "Default volume"
         },
         "data_description": {
-          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server."
+          "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server.",
+          "volume_multiplier": "Multiplies output loudness for every message (1.0 = unchanged, 2.0 = louder). Can be overridden per call."
         }
       }
     },

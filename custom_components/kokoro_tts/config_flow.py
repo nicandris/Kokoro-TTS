@@ -24,6 +24,7 @@ from .const import (
     CONF_SAMPLE_RATE,
     CONF_SEX,
     CONF_SPEED,
+    CONF_VOLUME_MULTIPLIER,
     DEFAULTS,
     DOMAIN,
     FIXED_SAMPLE_RATE,
@@ -349,6 +350,16 @@ def _details_schema(
     schema[
         vol.Optional(CONF_FORMAT, default=ui.get(CONF_FORMAT, DEFAULTS[CONF_FORMAT]))
     ] = selector.selector({"select": {"options": _FORMAT_OPTIONS, "mode": "dropdown"}})
+
+    # Default volume multiplier: boosts/attenuates output (1.0 = unchanged).
+    schema[
+        vol.Optional(
+            CONF_VOLUME_MULTIPLIER,
+            default=ui.get(CONF_VOLUME_MULTIPLIER, DEFAULTS[CONF_VOLUME_MULTIPLIER]),
+        )
+    ] = selector.selector(
+        {"number": {"min": 0.1, "max": 5.0, "step": 0.1, "mode": "slider"}}
+    )
 
     # Sample rate: read-only. Kokoro FastAPI always outputs 24 kHz, so this is
     # surfaced for transparency but cannot be changed (and is never sent).
