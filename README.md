@@ -14,6 +14,18 @@
 
 ---
 
+> [!WARNING]
+> **Experimental fork.** This is an experimental fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) by [@nicandris](https://github.com/nicandris). It adds features on top of upstream and may diverge from it.
+
+### ✨ Added in this fork
+
+- In-repo HACS / Home Assistant brand images (icon & logo).
+- Options changes apply immediately — the TTS entity reloads (no restart); HTTP 401 triggers re-authentication; Home Assistant's shared HTTP session is reused.
+- Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one; the entity advertises the configured voice's language.
+- Configurable **default volume** in the setup menu; sample rate is shown read-only (Kokoro output is fixed at 24 kHz).
+
+See the [changelog](CHANGELOG.md) for the full list of changes.
+
 <p align="center">
   <em>
     A <a href="https://www.home-assistant.io/">Home Assistant</a> custom integration for connecting to <a href="https://github.com/remsky/Kokoro-FastAPI">Kokoro FastAPI</a>, enabling high-quality local Text-to-Speech.  
