@@ -2,6 +2,12 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.08.01.1 — CI maintenance
+
+- Bump `actions/checkout` v4 → v7 and `actions/setup-python` v5 → v7.
+- Test matrix now Python 3.13 and 3.14; drop 3.12, which no supported Home Assistant core runs on (core requires >=3.14.2).
+- No functional change to the integration.
+
 ## 2026.07.12.5 — Add license
 
 - Add LICENSE
