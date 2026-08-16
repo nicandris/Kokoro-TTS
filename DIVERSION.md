@@ -48,10 +48,12 @@ because upstream's two-step flow is built around display names.
 
 ## 1. Reuse Home Assistant's shared aiohttp session
 
-**Bug.** Upstream opens `aiohttp.ClientSession(timeout=timeout)` for every TTS call, and again
-for every stream. A fresh session means no connection reuse, and it bypasses the client Home
-Assistant has already configured (proxies, SSL context, cleanup on unload). Home Assistant's
-own developer docs call this out — integrations are expected to use the shared session.
+**Bug.** Upstream opens `aiohttp.ClientSession(timeout=timeout)` for every TTS call
+([`tts.py:240`](https://github.com/beecho01/Kokoro-TTS/blob/48014b9/custom_components/kokoro_tts/tts.py#L240))
+and again for every stream
+([`tts.py:327`](https://github.com/beecho01/Kokoro-TTS/blob/48014b9/custom_components/kokoro_tts/tts.py#L327)).
+A fresh session per call means no connection reuse or keep-alive, and it sidesteps the client
+Home Assistant has already built and manages the lifecycle of.
 
 The cost is highest on the streaming path, where it is one entire session per spoken reply.
 
@@ -122,12 +124,33 @@ Upstream shows personas in the dropdown by display name, then converts back with
 | `em_alex` | Spanish | Alex |
 | `pm_alex` | Brazilian Portuguese | Alex |
 
-Pick the Hindi "Alpha" and the reverse lookup returns whichever entry it finds first — you get
-the Japanese voice, silently, with no error. The Santa collision is three-way.
+`get_technical_persona_name` tries an exact match on the bare display name first, iterating
+`PERSONA_MAPPINGS` in definition order and returning the first hit. For "Alpha" that is
+`jf_alpha`, because Japanese is defined before Hindi.
 
-Upstream's two-step flow narrows this in practice (the accent filter usually disambiguates), but
-it doesn't remove it: the persona field accepts a custom value, and "All Languages" is the
-default filter.
+**The two-step flow makes this more likely, not less.** `get_persona_display_name` returns the
+*bare* name — "Alpha", with no qualifier — precisely when both an accent and a sex filter are
+active, because the qualifier would be redundant. That is the normal path through the new
+wizard. So filtering to Hindi + Female shows "Alpha", and saving it stores `jf_alpha`: the
+Japanese voice, silently, with no error and no warning in the log.
+
+The qualified variants (`Alpha (Hindi, Female)`) only appear when a filter is left on "All",
+and those resolve correctly via the second loop. The collision is specific to the filtered
+case — the case the two-step flow steers users into.
+
+Running upstream's own two helpers back to back over all 54 voices, **5 do not survive the
+round trip** when both filters are set:
+
+| Picked | Actually stored | You get |
+|---|---|---|
+| `hf_alpha` (Hindi) | `jf_alpha` | Japanese |
+| `em_santa` (Spanish) | `am_santa` | American English |
+| `pm_santa` (Brazilian Portuguese) | `am_santa` | American English |
+| `pf_dora` (Brazilian Portuguese) | `ef_dora` | Spanish |
+| `pm_alex` (Brazilian Portuguese) | `em_alex` | Spanish |
+
+Brazilian Portuguese is hit hardest: it has exactly three voices, and **all three** are
+unreachable through the filtered picker — selecting any of them gives you a different language.
 
 **Ours:** the selector's option *value* is the code and the *label* is the friendly name, so no
 reverse mapping is needed or exists — see
@@ -222,9 +245,10 @@ Two details that differ from upstream's handling:
 - It is sent **always**, not only when `!= 1.0`
   ([`tts.py:239`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/custom_components/kokoro_tts/tts.py#L236-L240)),
   so an explicit `1.0` can override a server-side default rather than being silently omitted.
-- The streaming path resolves it through the same `_resolve_options`, so the configured default
-  applies there too. Upstream's streaming code reads `DEFAULT_VOLUME_MULTIPLIER` directly and
-  would ignore any configured value.
+- Both paths resolve it through the same `_resolve_options`, so the configured default applies
+  to streaming as well. Upstream's `_resolve_options` falls back to the `DEFAULT_VOLUME_MULTIPLIER`
+  constant — consistent for them, since they have no configured default to fall back to, but it
+  means adding the setting requires changing the resolver rather than just the schema.
 
 **Tests:** [`test_default_volume_multiplier_applied`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/tests/test_tts_request.py#L104-L109)
 and [`test_stream_applies_default_volume_multiplier`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/tests/test_tts_streaming.py#L193-L201).
@@ -251,10 +275,19 @@ nothing shouldn't look adjustable.
 
 ## 10. Reload on any entry change, not just options
 
-**Design disagreement.** Upstream subclasses `OptionsFlowWithReload`, which reloads the entry
-when options change. That covers the common case, but not a reauth that writes a new API key into
-`entry.data` — after a successful reauth the entity keeps using the old key until Home Assistant
-restarts.
+**Design disagreement — but Home Assistant has an opinion here.** Upstream subclasses
+`OptionsFlowWithReload`, which reloads the entry when the flow ends by calling
+`async_create_entry` with changed options. That covers the common case, but not a reauth that
+writes a new API key into `entry.data` — after a successful reauth the entity keeps using the
+old key until Home Assistant restarts.
+
+The two approaches are explicitly mutually exclusive. From `OptionsFlowWithReload`'s own
+docstring in `homeassistant/config_entries.py`:
+
+> It's not allowed to use this class if the integration uses config entry update listeners.
+
+So this isn't a free choice of one, the other, or both — an integration picks exactly one.
+This fork picks the listener because it covers strictly more.
 
 **Ours:** an update listener registered in
 [`__init__.py:28`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/custom_components/kokoro_tts/__init__.py#L25-L31),
@@ -262,9 +295,10 @@ reloading via
 [`async_reload_entry`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/custom_components/kokoro_tts/__init__.py#L38-L45).
 It fires on any entry update, options and data alike.
 
-**Do not use both.** The options flow here is deliberately plain `OptionsFlow`
-([`config_flow.py:600`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/custom_components/kokoro_tts/config_flow.py#L600-L607));
-combining the listener with `OptionsFlowWithReload` reloads the entry twice on every options save.
+Accordingly the options flow here is deliberately plain `OptionsFlow`
+([`config_flow.py:600`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/custom_components/kokoro_tts/config_flow.py#L600-L607)).
+Anyone porting this should switch one way or the other, not add the listener on top of
+`OptionsFlowWithReload` — that reloads the entry twice on every options save.
 
 **Test:** [`test_setup_entry_registers_options_reload_listener`](https://github.com/nicandris/Kokoro-TTS/blob/adf45cfb2b37e527eafd35547d5009fddc7cfe07/tests/test_setup.py#L35-L48).
 
