@@ -15,6 +15,7 @@ instead of being silently clobbered by these stubs.
 """
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import pathlib
 import sys
@@ -110,20 +111,23 @@ def _stub_homeassistant() -> None:
         def __init__(self, *args, **kwargs):
             pass
 
+    # Field names, order and required-ness mirror homeassistant.components.tts
+    # .entity exactly. Keep them in sync: a looser stub silently accepts calls
+    # that real Home Assistant rejects with a TypeError.
+    @dataclasses.dataclass
     class TTSAudioRequest:
-        """Streaming request: an async generator of text plus per-call options."""
+        """Streaming request: per-call options plus an async text generator."""
 
-        def __init__(self, message_gen, options=None, language=None):
-            self.message_gen = message_gen
-            self.options = options
-            self.language = language
+        language: str
+        options: dict
+        message_gen: object
 
+    @dataclasses.dataclass
     class TTSAudioResponse:
         """Streaming response: the audio extension plus an async byte generator."""
 
-        def __init__(self, extension, data_gen):
-            self.extension = extension
-            self.data_gen = data_gen
+        extension: str
+        data_gen: object
 
     tts_entity.TextToSpeechEntity = TextToSpeechEntity
     tts_entity.TTSAudioRequest = TTSAudioRequest

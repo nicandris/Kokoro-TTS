@@ -89,7 +89,7 @@ async def _agen(*chunks: str):
 async def _drain(entity, chunks, options=None):
     """Run the streaming path over `chunks` and return the concatenated audio."""
     response = await entity.async_stream_tts_audio(
-        TTSAudioRequest(message_gen=_agen(*chunks), options=options)
+        TTSAudioRequest(language="en", options=options or {}, message_gen=_agen(*chunks))
     )
     audio = b"".join([chunk async for chunk in response.data_gen])
     return response, audio

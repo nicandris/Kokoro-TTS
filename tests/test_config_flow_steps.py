@@ -74,7 +74,9 @@ class _ConfigFlow(_FlowRecorder, KokoroConfigFlow):
         }
 
     async def async_set_unique_id(self, unique_id):
-        self.unique_id = unique_id
+        # Real ConfigFlow exposes unique_id as a read-only property, so record
+        # it under a different name rather than shadowing the attribute.
+        self.assigned_unique_id = unique_id
 
     def _abort_if_unique_id_configured(self):
         return None

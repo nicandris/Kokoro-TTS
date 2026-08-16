@@ -6,7 +6,10 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Fast path: Home Assistant is stubbed in tests/conftest.py, so this proves
+  # the suite stays runnable without installing HA at all.
   pytest:
+    name: stubbed (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,5 +22,28 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install test dependencies
         run: pip install -r requirements_test.txt
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  # Slow path: the same suite against the real Home Assistant release. The
+  # stubs only make imports succeed - they cannot catch a signature that has
+  # drifted from the real API, which is exactly what this job is for.
+  pytest-homeassistant:
+    name: real Home Assistant (latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          # Home Assistant requires >=3.14.2; 3.13 cannot run it at all.
+          python-version: "3.14"
+      - name: Install Home Assistant and test dependencies
+        # mutagen and ha-ffmpeg are requirements of HA's own tts/ffmpeg
+        # components, which the base homeassistant package does not pull in.
+        run: |
+          pip install -r requirements_test.txt
+          pip install homeassistant mutagen ha-ffmpeg
+          python -c "from homeassistant.const import __version__; print('Home Assistant', __version__)"
       - name: Run tests
         run: python -m pytest tests/ -v
