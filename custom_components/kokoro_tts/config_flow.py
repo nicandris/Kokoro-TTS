@@ -41,6 +41,10 @@ _LOGGER = logging.getLogger(__name__)
 
 _FORMAT_OPTIONS = ["mp3", "wav", "opus", "flac", "pcm"]
 
+# Transient, wizard-only field - never stored in the config entry. Lets the
+# persona step send the user back to the filter step.
+CONF_CHANGE_FILTERS = "change_filters"
+
 
 # ---------------------------------------------------------------------------
 # Persona helpers
@@ -78,7 +82,13 @@ def derive_persona_info(code: str) -> tuple[str, str, str] | None:
     American English / Female / "Heart"). This lets voices the server reports
     but that aren't in PERSONA_MAPPINGS still be classified and filtered,
     instead of only appearing when no filters are active.
+
+    Blends ("af_bella+af_sky") are deliberately unclassifiable: they have no
+    single language or sex, and deriving one from the first component would
+    hide a configured blend behind an unrelated filter.
     """
+    if "+" in code:
+        return None
     if "_" not in code:
         return None
     prefix, _, raw_name = code.partition("_")
@@ -270,16 +280,19 @@ def _base_schema(user_input: dict | None = None) -> vol.Schema:
     )
 
 
-def _details_schema(
-    models: list[str],
-    personas: list[str],
-    user_input: dict | None = None,
-) -> vol.Schema:
-    """Schema for details step with dynamic selectors."""
+def _filters_schema(models: list[str], user_input: dict | None = None) -> vol.Schema:
+    """Schema for the model/accent/sex filter step.
+
+    This is a separate wizard step (rather than fields alongside Persona)
+    because Home Assistant's config-flow forms are not reactive: changing a
+    dropdown does nothing until the form is submitted. Splitting filtering
+    from persona selection into two steps makes that submit boundary an
+    explicit "Next", instead of the same "Submit" sometimes finalizing and
+    sometimes silently just refreshing the persona list.
+    """
     ui = user_input or {}
     schema: dict[vol.Optional | vol.Required, Any] = {}
 
-    # Model selector
     if models:
         schema[
             vol.Optional(CONF_MODEL, default=ui.get(CONF_MODEL, DEFAULTS[CONF_MODEL]))
@@ -297,17 +310,36 @@ def _details_schema(
             vol.Optional(CONF_MODEL, default=ui.get(CONF_MODEL, DEFAULTS[CONF_MODEL]))
         ] = str
 
-    # Language filter
-    selected_language = ui.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
-    schema[vol.Optional(CONF_LANGUAGE, default=selected_language)] = selector.selector(
-        {"select": {"options": LANGUAGE_OPTIONS, "mode": "dropdown"}}
-    )
+    schema[
+        vol.Optional(CONF_LANGUAGE, default=ui.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]))
+    ] = selector.selector({"select": {"options": LANGUAGE_OPTIONS, "mode": "dropdown"}})
 
-    # Sex filter
-    selected_sex = ui.get(CONF_SEX, DEFAULTS[CONF_SEX])
-    schema[vol.Optional(CONF_SEX, default=selected_sex)] = selector.selector(
-        {"select": {"options": SEX_OPTIONS, "mode": "dropdown"}}
-    )
+    schema[
+        vol.Optional(CONF_SEX, default=ui.get(CONF_SEX, DEFAULTS[CONF_SEX]))
+    ] = selector.selector({"select": {"options": SEX_OPTIONS, "mode": "dropdown"}})
+
+    return vol.Schema(schema)
+
+
+def _persona_schema(
+    personas: list[str],
+    selected_language: str,
+    selected_sex: str,
+    user_input: dict | None = None,
+) -> vol.Schema:
+    """Schema for the persona + audio settings step.
+
+    selected_language/selected_sex come from the filters step that already
+    ran, so the persona list here is always pre-filtered - there is no
+    "was this a filter change or a final submit" ambiguity to resolve.
+    """
+    ui = user_input or {}
+    schema: dict[vol.Optional | vol.Required, Any] = {}
+
+    # "Back" affordance: HA config-flow forms have no native back button, so
+    # this checkbox is how a user returns to the filter step to change accent
+    # or sex without restarting the whole flow.
+    schema[vol.Optional(CONF_CHANGE_FILTERS, default=False)] = bool
 
     # Persona selector (filtered). Option values are technical codes.
     if personas:
@@ -383,6 +415,8 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._base_info: dict[str, Any] = {}
         self._discovered: dict[str, list[str]] = {}
+        self._filters: dict[str, Any] = {}
+        self._persona_prefill: dict[str, Any] = {}
 
     @staticmethod
     @callback
@@ -421,14 +455,14 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_BASE_URL: base,
                         CONF_API_KEY: api_key,
                     }
-                    return await self.async_step_details()
+                    return await self.async_step_filters()
 
         return self.async_show_form(
             step_id="user", data_schema=_base_schema(user_input), errors=errors
         )
 
-    async def async_step_details(self, user_input: dict | None = None):
-        """Handle model/persona selection with dynamic discovery."""
+    async def async_step_filters(self, user_input: dict | None = None):
+        """Handle model/accent/sex filter selection with dynamic discovery."""
         base_url = self._base_info[CONF_BASE_URL]
         api_key = self._base_info.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
 
@@ -438,34 +472,55 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._discovered = {"models": models, "personas": personas}
         else:
             models = self._discovered["models"]
-            personas = self._discovered["personas"]
 
         if user_input is not None:
-            # Check if this is a filter change (language or sex changed, no persona selected)
-            has_persona = bool(
-                user_input.get(CONF_PERSONA)
-                and str(user_input.get(CONF_PERSONA)).strip()
-            )
+            self._filters = {
+                CONF_MODEL: user_input.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
+                CONF_LANGUAGE: user_input.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
+                CONF_SEX: user_input.get(CONF_SEX, DEFAULTS[CONF_SEX]),
+            }
+            return await self.async_step_persona()
 
-            if not has_persona:
-                # Re-render with updated filters
-                schema = _details_schema(models, personas, user_input)
-                return self.async_show_form(step_id="details", data_schema=schema)
+        # Pre-fill from the last-submitted filters (e.g. when the user comes
+        # back here via the persona step's "Change Voice Accent / Sex").
+        return self.async_show_form(
+            step_id="filters", data_schema=_filters_schema(models, self._filters)
+        )
+
+    async def async_step_persona(self, user_input: dict | None = None):
+        """Handle persona and audio settings, filtered by the previous step."""
+        personas = self._discovered.get("personas", [])
+        selected_language = self._filters.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
+        selected_sex = self._filters.get(CONF_SEX, DEFAULTS[CONF_SEX])
+
+        if user_input is not None:
+            if user_input.pop(CONF_CHANGE_FILTERS, False):
+                # Keep whatever speed/format/sample_rate the user already set;
+                # the persona itself is dropped, since it may not match
+                # whatever accent/sex they pick next.
+                self._persona_prefill = {
+                    k: v for k, v in user_input.items() if k != CONF_PERSONA
+                }
+                return await self.async_step_filters()
 
             # Validate persona selection
             selected_persona = user_input.get(CONF_PERSONA)
             if not selected_persona or not str(selected_persona).strip():
                 return self.async_show_form(
-                    step_id="details",
-                    data_schema=_details_schema(models, personas, user_input),
+                    step_id="persona",
+                    data_schema=_persona_schema(
+                        personas, selected_language, selected_sex, user_input
+                    ),
                     errors={CONF_PERSONA: "persona_required"},
                 )
 
             # CONF_PERSONA is already the technical code (the selector option
             # value), so no display-name reverse-mapping is needed.
-            data = {**self._base_info, **user_input}
+            # Merge base info, filters and persona/audio settings.
+            data = {**self._base_info, **self._filters, **user_input}
 
             # Create entry with unique ID
+            base_url = self._base_info[CONF_BASE_URL]
             unique_id = _calc_unique_id(base_url)
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
@@ -475,7 +530,10 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=title, data=data)
 
         return self.async_show_form(
-            step_id="details", data_schema=_details_schema(models, personas, user_input)
+            step_id="persona",
+            data_schema=_persona_schema(
+                personas, selected_language, selected_sex, self._persona_prefill
+            ),
         )
 
     async def async_step_reauth(self, entry_data: dict):
@@ -540,73 +598,133 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 class KokoroOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow for Kokoro TTS."""
+    """Handle options flow for Kokoro TTS.
+
+    Deliberately NOT OptionsFlowWithReload: __init__.py registers an update
+    listener that reloads the entry on any change, which covers both the
+    options flow and a reauth that swaps the API key. Using both would reload
+    the entry twice for every options save.
+    """
+
+    def __init__(self) -> None:
+        """Initialize options flow.
+
+        No config_entry argument: Home Assistant supplies self.config_entry on
+        the base class, and passing it explicitly has been deprecated.
+        """
+        self._filters: dict[str, Any] = {}
+        self._discovered: dict[str, list[str]] = {}
+        self._persona_prefill: dict[str, Any] = {}
+
+    async def _async_discover(self) -> tuple[list[str], list[str]]:
+        """Discover models/personas once per flow session, cached."""
+        if "models" not in self._discovered:
+            base_url = self.config_entry.data[CONF_BASE_URL]
+            api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+            models: list[str] = []
+            personas: list[str] = []
+            try:
+                models, personas = await _discover_models_and_personas(base_url, api_key)
+            except (aiohttp.ClientError, asyncio.TimeoutError):
+                _LOGGER.debug("Discovery failed for %s, falling back", base_url)
+            self._discovered = {"models": models, "personas": personas}
+        return self._discovered["models"], self._discovered["personas"]
 
     async def async_step_init(self, user_input: dict | None = None):
-        """Handle options step with dynamic discovery."""
+        """Handle the model/accent/sex filter step."""
+        models, _personas = await self._async_discover()
+
         if user_input is not None:
-            # Check if this is a filter change (no persona selected)
-            has_persona = bool(
-                user_input.get(CONF_PERSONA)
-                and str(user_input.get(CONF_PERSONA)).strip()
-            )
+            self._filters = {
+                CONF_MODEL: user_input.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
+                CONF_LANGUAGE: user_input.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
+                CONF_SEX: user_input.get(CONF_SEX, DEFAULTS[CONF_SEX]),
+            }
+            return await self.async_step_persona()
 
-            if not has_persona:
-                # Re-render with updated filters
-                data = {**self.config_entry.data, **(self.config_entry.options or {})}
-                data.pop(CONF_BASE_URL, None)
-                form_data = {**data, **user_input}
+        # Pre-fill from the in-session filters if we're back here via the
+        # persona step's "Change Voice Accent / Sex", otherwise from the
+        # stored entry.
+        if self._filters:
+            prefill = self._filters
+        else:
+            data = {**self.config_entry.data, **(self.config_entry.options or {})}
+            prefill = {
+                CONF_MODEL: data.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
+                CONF_LANGUAGE: data.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
+                CONF_SEX: data.get(CONF_SEX, DEFAULTS[CONF_SEX]),
+            }
+        return self.async_show_form(
+            step_id="init", data_schema=_filters_schema(models, prefill)
+        )
 
-                base_url = self.config_entry.data[CONF_BASE_URL]
-                api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-                models, personas = [], []
-                try:
-                    models, personas = await _discover_models_and_personas(base_url, api_key)
-                except (aiohttp.ClientError, asyncio.TimeoutError):
-                    pass
+    async def async_step_persona(self, user_input: dict | None = None):
+        """Handle persona and audio settings, filtered by the previous step."""
+        _models, personas = await self._async_discover()
+        selected_language = self._filters.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
+        selected_sex = self._filters.get(CONF_SEX, DEFAULTS[CONF_SEX])
 
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=_details_schema(models, personas, form_data),
-                )
+        if user_input is not None:
+            if user_input.pop(CONF_CHANGE_FILTERS, False):
+                # Keep whatever speed/format/sample_rate the user already set;
+                # the persona itself is dropped, since it may not match
+                # whatever accent/sex they pick next.
+                self._persona_prefill = {
+                    k: v for k, v in user_input.items() if k != CONF_PERSONA
+                }
+                return await self.async_step_init()
 
             # Validate persona
             selected_persona = user_input.get(CONF_PERSONA)
             if not selected_persona or not str(selected_persona).strip():
-                data = {**self.config_entry.data, **(self.config_entry.options or {})}
-                data.pop(CONF_BASE_URL, None)
-                form_data = {**data, **user_input}
-
-                base_url = self.config_entry.data[CONF_BASE_URL]
-                api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-                try:
-                    models, personas = await _discover_models_and_personas(base_url, api_key)
-                except (aiohttp.ClientError, asyncio.TimeoutError):
-                    models, personas = [], []
-
                 return self.async_show_form(
-                    step_id="init",
-                    data_schema=_details_schema(models, personas, form_data),
+                    step_id="persona",
+                    data_schema=_persona_schema(
+                        personas, selected_language, selected_sex, user_input
+                    ),
                     errors={CONF_PERSONA: "persona_required"},
                 )
 
-            # CONF_PERSONA is already the technical code (the selector value).
-            return self.async_create_entry(title="", data=user_input)
+            # CONF_PERSONA is already the technical code (the selector option
+            # value), so no display-name reverse-mapping is needed.
+            return self.async_create_entry(title="", data={**self._filters, **user_input})
 
-        # Initial form display. The stored CONF_PERSONA is the technical code,
-        # which is exactly what the selector uses as its option value/default.
+        # Pre-fill audio settings from the stored entry. Only pre-fill the
+        # persona itself if it still matches the filters just chosen -
+        # otherwise leave it blank so the list forces an explicit pick.
+        # Sample rate is deliberately absent: it is read-only and always
+        # rendered from FIXED_SAMPLE_RATE by _persona_schema.
         data = {**self.config_entry.data, **(self.config_entry.options or {})}
-        base_url = data.pop(CONF_BASE_URL, None)
+        prefill: dict[str, Any] = {
+            CONF_SPEED: data.get(CONF_SPEED, DEFAULTS[CONF_SPEED]),
+            CONF_FORMAT: data.get(CONF_FORMAT, DEFAULTS[CONF_FORMAT]),
+            CONF_VOLUME_MULTIPLIER: data.get(
+                CONF_VOLUME_MULTIPLIER, DEFAULTS[CONF_VOLUME_MULTIPLIER]
+            ),
+        }
+        stored_persona = data.get(CONF_PERSONA)
+        if stored_persona:
+            # Classify with the same helper the list filter uses, so a voice
+            # the server reports but PERSONA_MAPPINGS doesn't know still gets
+            # matched against the filters rather than always being offered.
+            info = PERSONA_MAPPINGS.get(stored_persona) or derive_persona_info(
+                stored_persona
+            )
+            if info is None:
+                # Unclassifiable (e.g. a blended voice) - always offer it back.
+                prefill[CONF_PERSONA] = stored_persona
+            else:
+                persona_language, persona_sex, _name = info
+                if selected_language in ("All Languages", persona_language) and (
+                    selected_sex in ("All", persona_sex)
+                ):
+                    prefill[CONF_PERSONA] = stored_persona
 
-        # Discover models/personas
-        models, personas = [], []
-        if base_url:
-            api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-            try:
-                models, personas = await _discover_models_and_personas(base_url, api_key)
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                pass
+        # Overlay any in-session edits from a "Change Voice Accent / Sex"
+        # round trip - these are fresher than what's stored on the entry.
+        prefill.update(self._persona_prefill)
 
         return self.async_show_form(
-            step_id="init", data_schema=_details_schema(models, personas, data)
+            step_id="persona",
+            data_schema=_persona_schema(personas, selected_language, selected_sex, prefill),
         )

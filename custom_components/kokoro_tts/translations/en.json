@@ -9,13 +9,20 @@
           "api_key": "API Key (optional, leave default if not needed)"
         }
       },
-      "details": {
-        "title": "Kokoro TTS Configuration",
-        "description": "Configure your TTS settings. Use the Voice Accent and Sex filters to narrow down the persona list, then select a persona.",
+      "filters": {
+        "title": "Filter Voices",
+        "description": "Choose a model and narrow the voice list by accent and sex. The next step will show only personas matching your choices here.",
         "data": {
           "model": "Model",
           "language": "Voice Accent",
-          "sex": "Sex",
+          "sex": "Sex"
+        }
+      },
+      "persona": {
+        "title": "Select Persona",
+        "description": "Pick a persona from the filtered list, then set your default speech options. Tip: to blend voices, type a custom value such as `af_bella+af_sky` (equal blend) or `af_bella(2)+af_sky(1)` (weighted blend) instead of picking one from the list.",
+        "data": {
+          "change_filters": "Change Voice Accent / Sex",
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
@@ -23,6 +30,7 @@
           "volume_multiplier": "Default volume"
         },
         "data_description": {
+          "change_filters": "Enable and submit to go back and pick a different accent or sex instead of a persona",
           "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server.",
           "volume_multiplier": "Multiplies output loudness for every message (1.0 = unchanged, 2.0 = louder). Can be overridden per call."
         }
@@ -55,12 +63,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "Kokoro TTS Options",
-        "description": "Adjust default settings. Use the Voice Accent and Sex filters to narrow down the persona list, then select a persona.",
+        "title": "Kokoro TTS Options: Filter Voices",
+        "description": "Choose a model and narrow the voice list by accent and sex. The next step will show only personas matching your choices here.",
         "data": {
           "model": "Model",
           "language": "Voice Accent",
-          "sex": "Sex",
+          "sex": "Sex"
+        }
+      },
+      "persona": {
+        "title": "Kokoro TTS Options: Select Persona",
+        "description": "Pick a persona from the filtered list, then set your default speech options. Tip: to blend voices, type a custom value such as `af_bella+af_sky` (equal blend) or `af_bella(2)+af_sky(1)` (weighted blend) instead of picking one from the list.",
+        "data": {
+          "change_filters": "Change Voice Accent / Sex",
           "persona": "Persona",
           "speed": "Speech speed (0.25x - 4.0x)",
           "format": "Audio format",
@@ -68,6 +83,7 @@
           "volume_multiplier": "Default volume"
         },
         "data_description": {
+          "change_filters": "Enable and submit to go back and pick a different accent or sex instead of a persona",
           "sample_rate": "Read-only. Kokoro FastAPI always outputs 24000 Hz, so the sample rate is fixed and is not sent to the server.",
           "volume_multiplier": "Multiplies output loudness for every message (1.0 = unchanged, 2.0 = louder). Can be overridden per call."
         }

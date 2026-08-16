@@ -110,7 +110,24 @@ def _stub_homeassistant() -> None:
         def __init__(self, *args, **kwargs):
             pass
 
+    class TTSAudioRequest:
+        """Streaming request: an async generator of text plus per-call options."""
+
+        def __init__(self, message_gen, options=None, language=None):
+            self.message_gen = message_gen
+            self.options = options
+            self.language = language
+
+    class TTSAudioResponse:
+        """Streaming response: the audio extension plus an async byte generator."""
+
+        def __init__(self, extension, data_gen):
+            self.extension = extension
+            self.data_gen = data_gen
+
     tts_entity.TextToSpeechEntity = TextToSpeechEntity
+    tts_entity.TTSAudioRequest = TTSAudioRequest
+    tts_entity.TTSAudioResponse = TTSAudioResponse
     tts_entity.TtsAudioType = tuple
     tts_pkg.entity = tts_entity
     components.tts = tts_pkg

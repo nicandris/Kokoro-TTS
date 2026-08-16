@@ -29,6 +29,12 @@ DEFAULT_VOLUME_MULTIPLIER = 1.0
 # Kokoro FastAPI always outputs 24 kHz; shown read-only in the UI and never sent.
 FIXED_SAMPLE_RATE = 24000
 
+# Streaming synthesises one sentence per request and concatenates the audio,
+# so the format must survive concatenation. Container formats that carry a
+# per-file header (wav, flac) do not.
+STREAM_SAFE_FORMATS: tuple[str, ...] = ("mp3", "opus", "pcm")
+DEFAULT_STREAM_FORMAT = "mp3"
+
 # Voice mapping: technical_name -> (language, gender, display_name)
 PERSONA_MAPPINGS = {
     # American English (🇺🇸)
@@ -139,19 +145,42 @@ LANGUAGE_CODE_MAP: dict[str, str] = {
     "Brazilian Portuguese": "p",
 }
 
-# Map Kokoro single-letter lang codes to Home Assistant locale codes, so the TTS
-# entity advertises the language of its configured voice instead of always "en".
+# Maps our language display names to the language codes Home Assistant uses.
+# Home Assistant hides a TTS entity from any pipeline whose language is not
+# advertised here, so this must cover every language Kokoro can speak.
+LANGUAGE_HA_CODE_MAP: dict[str, str] = {
+    "American English": "en",
+    "British English": "en-GB",
+    "Japanese": "ja",
+    "Mandarin Chinese": "zh",
+    "Spanish": "es",
+    "French": "fr",
+    "Hindi": "hi",
+    "Italian": "it",
+    "Brazilian Portuguese": "pt-BR",
+}
+
+# Map Kokoro single-letter lang codes to the same HA locales, so the entity's
+# *default* language follows the configured voice rather than the (possibly
+# "All Languages") filter. Values must stay a subset of SUPPORTED_LANGUAGES.
 LANG_CODE_TO_HA_LOCALE: dict[str, str] = {
     "a": "en",  # American English
-    "b": "en",  # British English
+    "b": "en-GB",  # British English
     "j": "ja",  # Japanese
     "z": "zh",  # Mandarin Chinese
     "e": "es",  # Spanish
     "f": "fr",  # French
     "h": "hi",  # Hindi
     "i": "it",  # Italian
-    "p": "pt",  # Brazilian Portuguese
+    "p": "pt-BR",  # Brazilian Portuguese
 }
+
+# Advertised to Home Assistant, derived from the voices Kokoro ships with.
+SUPPORTED_LANGUAGES: list[str] = sorted(set(LANGUAGE_HA_CODE_MAP.values()))
+
+# Used when no language is configured, or when "All Languages" is selected.
+DEFAULT_HA_LANGUAGE = "en"
+
 
 # Consolidated defaults dictionary
 DEFAULTS: dict[str, Any] = {

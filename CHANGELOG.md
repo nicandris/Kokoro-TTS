@@ -2,6 +2,31 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.08.16.1 — Merge upstream 2026.08.15
+
+Syncs [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) up to `2026.08.15`. Several upstream commits re-fix things this fork had already fixed independently (options reload, entry reload, in-repo brand images); those were resolved in favour of the existing implementation.
+
+Taken from upstream:
+
+- **Streaming TTS.** `async_stream_tts_audio` synthesises one request per finished sentence, so Assist starts speaking before the conversation agent has finished writing. Formats that cannot be concatenated (`wav`, `flac`) fall back to `mp3`.
+- **Two-step config/options flow.** Model/accent/sex now live in a "Filter Voices" step, persona and audio settings in a "Select Persona" step, with a `Change Voice Accent / Sex` checkbox to go back. Home Assistant forms are not reactive, so this removes the old ambiguity where Submit sometimes saved and sometimes just refreshed the persona list.
+- **Advertise every supported language.** Home Assistant hides a TTS entity from any pipeline whose language it does not advertise, so all nine are now listed instead of only the configured voice's.
+- Minimum Home Assistant version declared (`2025.8.0`).
+
+Fork behaviour kept over upstream's version:
+
+- Persona selector still stores the **technical voice code** as the option value. Upstream reverse-maps the display name, which picks the wrong voice whenever two share a name (`jf_alpha` / `hf_alpha`, both "Alpha").
+- Shared aiohttp session and `ConfigEntryAuthFailed` on HTTP 401 — now applied to upstream's new streaming path too, which opened its own session per stream and raised a plain `RuntimeError` on 401 (so a bad API key never triggered reauth).
+- Configurable default volume; upstream's streaming path read a hardcoded `1.0` and ignored the setting.
+- `unique_id` derived from the config entry, read-only 24 kHz sample rate, narrowed exception handling.
+
+Fixed while merging:
+
+- The entity's **default** language now follows the configured voice (Japanese voice → `ja`) while the advertised set stays complete; `en-GB` and `pt-BR` are used so the default is always a member of the advertised set.
+- Blended voices (`af_bella+af_sky`) are treated as unclassifiable again. Deriving a language from the first component hid a configured blend behind an unrelated accent filter.
+- Kept a single reload mechanism: the update listener in `__init__.py` covers both options changes and a reauth that swaps the API key, where `OptionsFlowWithReload` covers only the former.
+- Options prefill no longer reads a `sample_rate` default that does not exist.
+
 ## 2026.08.01.1 — CI maintenance
 
 - Bump `actions/checkout` v4 → v7 and `actions/setup-python` v5 → v7.

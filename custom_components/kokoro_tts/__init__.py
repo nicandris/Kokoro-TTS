@@ -36,9 +36,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry when options change.
+    """Reload config entry when it changes.
 
-    This ensures the TTS entity is recreated with updated settings
-    (persona, speed, format, etc.) without requiring a HA restart.
+    Rebuilds the TTS entity with the updated settings (persona, speed, format,
+    volume) without requiring a Home Assistant restart. Also covers a reauth
+    that swaps the API key, which an options-only reload would miss.
     """
     await hass.config_entries.async_reload(entry.entry_id)

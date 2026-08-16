@@ -1,13 +1,20 @@
 """Kokoro TTS entity for Home Assistant."""
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
 import base64
 import logging
+import re
 
-from homeassistant.components.tts.entity import TextToSpeechEntity, TtsAudioType
+from homeassistant.components.tts.entity import (
+    TextToSpeechEntity,
+    TTSAudioRequest,
+    TTSAudioResponse,
+    TtsAudioType,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -24,12 +31,15 @@ from .const import (
     CONF_VOLUME_MULTIPLIER,
     DEFAULT_API_KEY,
     DEFAULT_FORMAT,
+    DEFAULT_HA_LANGUAGE,
     DEFAULT_MODEL,
     DEFAULT_SPEED,
+    DEFAULT_STREAM_FORMAT,
     DEFAULT_VOLUME_MULTIPLIER,
-    DOMAIN,
     LANG_CODE_TO_HA_LOCALE,
     LANGUAGE_CODE_MAP,
+    STREAM_SAFE_FORMATS,
+    SUPPORTED_LANGUAGES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +49,30 @@ SUPPORTED_OPTIONS = ["persona", "speed", "format", "volume_multiplier"]
 
 # Default entity name
 DEFAULT_NAME = "kokoro"
+
+# Size of the audio chunks yielded while streaming a sentence.
+STREAM_CHUNK_BYTES = 4096
+
+# A sentence ends on terminal punctuation followed by whitespace. Requiring the
+# trailing whitespace keeps decimals ("12.5") and mid-generation abbreviations
+# from being treated as sentence boundaries.
+SENTENCE_END_PATTERN = re.compile(r"[.!?…]+[\"'”’)\]]*\s+")
+
+
+def split_sentences(buffer: str) -> tuple[list[str], str]:
+    """Split a text buffer into complete sentences plus a trailing remainder.
+
+    The remainder is text that has not yet been terminated by punctuation; it is
+    kept in the buffer until more text arrives, or flushed when the stream ends.
+    """
+    sentences: list[str] = []
+    last_end = 0
+    for match in SENTENCE_END_PATTERN.finditer(buffer):
+        sentence = buffer[last_end : match.end()].strip()
+        if sentence:
+            sentences.append(sentence)
+        last_end = match.end()
+    return sentences, buffer[last_end:]
 
 
 async def async_setup_entry(
@@ -107,12 +141,15 @@ class KokoroTTSEntity(TextToSpeechEntity):
         self._language = language
         self._volume_multiplier = volume_multiplier
 
-        # Advertise the language of the configured voice rather than always
-        # "en", so Home Assistant routes the right locale to this entity.
-        lang_code = self._get_lang_code(persona)
-        locale = LANG_CODE_TO_HA_LOCALE.get(lang_code, "en") if lang_code else "en"
-        self._attr_default_language = locale
-        self._attr_supported_languages = [locale]
+        # Advertise every language Kokoro can speak: Home Assistant hides the
+        # entity from any pipeline whose language is not listed here.
+        self._attr_supported_languages = SUPPORTED_LANGUAGES
+        # Default to the configured voice's own locale. _get_lang_code prefers
+        # the language filter and falls back to the voice code prefix, so this
+        # stays correct when the filter is "All Languages".
+        self._attr_default_language = LANG_CODE_TO_HA_LOCALE.get(
+            self._get_lang_code(persona) or "", DEFAULT_HA_LANGUAGE
+        )
         self._attr_supported_options = SUPPORTED_OPTIONS
 
     @staticmethod
@@ -132,6 +169,25 @@ class KokoroTTSEntity(TextToSpeechEntity):
         }
         return error_map.get(status, f"HTTP {status} error: {text[:200]}")
 
+    async def _raise_for_status(self, response: aiohttp.ClientResponse) -> None:
+        """Raise a useful exception for a non-200 response.
+
+        Shared by the buffered and streaming paths so a 401 drives Home
+        Assistant's reauth flow in both, rather than only the buffered one.
+        """
+        if response.status == 200:
+            return
+
+        error_text = await response.text()
+        _LOGGER.warning(
+            "Kokoro TTS API error %d: %s", response.status, error_text[:200]
+        )
+        # Report 401s with HA's auth-failure exception (correct type, and lets
+        # HA drive the reauth flow for this entry).
+        if response.status == 401:
+            raise ConfigEntryAuthFailed("Authentication failed - check your API key")
+        raise RuntimeError(self._handle_http_error(response.status, error_text))
+
     def _get_lang_code(self, persona: str | None) -> str | None:
         """Determine the lang_code to send to the API.
 
@@ -145,29 +201,33 @@ class KokoroTTSEntity(TextToSpeechEntity):
             return persona[0].lower()
         return None
 
-    async def async_get_tts_audio(
-        self, message: str, language: str, options: dict[str, Any] | None = None
-    ) -> TtsAudioType:
-        """Get TTS audio from Kokoro API."""
-        if not message.strip():
-            raise ValueError("Message cannot be empty")
-
-        # Merge entity defaults with per-call options
+    def _resolve_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge entity defaults with per-call options."""
         opts = options or {}
-        persona = opts.get("persona", opts.get("voice", self._persona))
-        speed = float(opts.get("speed", self._speed))
-        fmt = (opts.get("format", self._fmt) or self._fmt).lower()
-        volume_multiplier = float(opts.get("volume_multiplier", self._volume_multiplier))
+        return {
+            "persona": opts.get("persona", opts.get("voice", self._persona)),
+            "speed": float(opts.get("speed", self._speed)),
+            "fmt": (opts.get("format", self._fmt) or self._fmt).lower(),
+            # Falls back to the entity's configured default volume, not a
+            # hardcoded 1.0, so the options-flow slider actually takes effect.
+            "volume_multiplier": float(
+                opts.get("volume_multiplier", self._volume_multiplier)
+            ),
+        }
 
-        # Build API payload
+    def _build_payload(
+        self, message: str, resolved: dict[str, Any], *, stream: bool
+    ) -> dict[str, Any]:
+        """Build the /v1/audio/speech request payload."""
+        persona = resolved["persona"]
         payload: dict[str, Any] = {
             "model": self._model,
             "input": message,
             "voice": persona or "af_heart",
-            "response_format": fmt,
-            "download_format": fmt,
-            "speed": speed,
-            "stream": False,
+            "response_format": resolved["fmt"],
+            "download_format": resolved["fmt"],
+            "speed": resolved["speed"],
+            "stream": stream,
         }
 
         # Add lang_code if we can determine one
@@ -176,33 +236,43 @@ class KokoroTTSEntity(TextToSpeechEntity):
             payload["lang_code"] = lang_code
 
         # Always send it so an explicit 1.0 can override a server-side default.
-        payload["volume_multiplier"] = volume_multiplier
+        payload["volume_multiplier"] = resolved["volume_multiplier"]
 
+        return payload
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build the request headers, including auth when configured."""
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if self._api_key and self._api_key not in ("x", "not-needed", ""):
             headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
-        url = f"{self._base_url}/v1/audio/speech"
+    @property
+    def _speech_url(self) -> str:
+        """Return the speech endpoint URL."""
+        return f"{self._base_url}/v1/audio/speech"
+
+    async def async_get_tts_audio(
+        self, message: str, language: str, options: dict[str, Any] | None = None
+    ) -> TtsAudioType:
+        """Get TTS audio from Kokoro API."""
+        if not message.strip():
+            raise ValueError("Message cannot be empty")
+
+        resolved = self._resolve_options(options)
+        fmt = resolved["fmt"]
+        payload = self._build_payload(message, resolved, stream=False)
         timeout = aiohttp.ClientTimeout(total=60, connect=10)
 
         # Reuse Home Assistant's shared aiohttp session (pooled, not closed here).
         session = async_get_clientsession(self.hass)
         async with session.post(
-            url, json=payload, headers=headers, timeout=timeout
+            self._speech_url,
+            json=payload,
+            headers=self._build_headers(),
+            timeout=timeout,
         ) as response:
-            if response.status != 200:
-                error_text = await response.text()
-                _LOGGER.warning(
-                    "Kokoro TTS API error %d: %s", response.status, error_text[:200]
-                )
-                # Report 401s with HA's auth-failure exception (correct type,
-                # and lets HA drive the reauth flow for this entry).
-                if response.status == 401:
-                    raise ConfigEntryAuthFailed(
-                        "Authentication failed - check your API key"
-                    )
-                error_msg = self._handle_http_error(response.status, error_text)
-                raise RuntimeError(error_msg)
+            await self._raise_for_status(response)
 
             content_type = response.headers.get("content-type", "").lower()
 
@@ -237,3 +307,94 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
             _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
             return fmt, audio_bytes
+
+    def async_supports_streaming_input(self) -> bool:
+        """Return True - text can be consumed as it is generated.
+
+        This lets the Assist pipeline forward the conversation agent's output as
+        it arrives instead of buffering the whole reply, so synthesis can start
+        on the first finished sentence.
+        """
+        return True
+
+    async def async_stream_tts_audio(
+        self, request: TTSAudioRequest
+    ) -> TTSAudioResponse:
+        """Stream audio, synthesising each sentence as soon as it is complete."""
+        resolved = self._resolve_options(request.options)
+        fmt = resolved["fmt"]
+
+        # Streaming issues one request per sentence and concatenates the audio.
+        # Container formats carrying a per-file header (wav, flac) cannot be
+        # concatenated that way, so fall back to a stream-safe format.
+        if fmt not in STREAM_SAFE_FORMATS:
+            _LOGGER.debug(
+                "Format %s cannot be concatenated while streaming, using %s instead",
+                fmt,
+                DEFAULT_STREAM_FORMAT,
+            )
+            fmt = DEFAULT_STREAM_FORMAT
+            resolved = {**resolved, "fmt": fmt}
+
+        return TTSAudioResponse(
+            extension=fmt,
+            data_gen=self._async_stream_audio(request.message_gen, resolved),
+        )
+
+    async def _async_stream_audio(
+        self, message_gen: AsyncGenerator[str], resolved: dict[str, Any]
+    ) -> AsyncGenerator[bytes]:
+        """Consume the text stream and yield audio for each complete sentence."""
+        # Reuse Home Assistant's shared session; the timeout is per-request.
+        # No total timeout: the stream lives as long as the agent is talking.
+        session = async_get_clientsession(self.hass)
+        timeout = aiohttp.ClientTimeout(total=None, connect=10, sock_read=60)
+        sentence_count = 0
+
+        buffer = ""
+        async for chunk in message_gen:
+            buffer += chunk
+            sentences, buffer = split_sentences(buffer)
+            for sentence in sentences:
+                sentence_count += 1
+                async for audio in self._async_stream_sentence(
+                    session, sentence, resolved, timeout
+                ):
+                    yield audio
+
+        # Flush the tail: the last sentence often has no trailing whitespace.
+        tail = buffer.strip()
+        if tail:
+            sentence_count += 1
+            async for audio in self._async_stream_sentence(
+                session, tail, resolved, timeout
+            ):
+                yield audio
+
+        _LOGGER.debug(
+            "TTS stream complete: %d sentence(s), format: %s",
+            sentence_count,
+            resolved["fmt"],
+        )
+
+    async def _async_stream_sentence(
+        self,
+        session: aiohttp.ClientSession,
+        message: str,
+        resolved: dict[str, Any],
+        timeout: aiohttp.ClientTimeout,
+    ) -> AsyncGenerator[bytes]:
+        """Synthesise one sentence and yield its audio as it arrives."""
+        payload = self._build_payload(message, resolved, stream=True)
+
+        async with session.post(
+            self._speech_url,
+            json=payload,
+            headers=self._build_headers(),
+            timeout=timeout,
+        ) as response:
+            await self._raise_for_status(response)
+
+            async for chunk in response.content.iter_chunked(STREAM_CHUNK_BYTES):
+                if chunk:
+                    yield chunk

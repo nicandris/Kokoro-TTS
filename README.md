@@ -15,14 +15,15 @@
 ---
 
 > [!WARNING]
-> **Experimental fork.** This is an experimental fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) by [@nicandris](https://github.com/nicandris). It adds features on top of upstream and may diverge from it.
+> **Experimental fork.** This is an experimental fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) by [@nicandris](https://github.com/nicandris). It adds features on top of upstream and may diverge from it. Last synced with upstream `2026.08.15`.
 
 ### ✨ Added in this fork
 
-- In-repo HACS / Home Assistant brand images (icon & logo).
-- Options changes apply immediately — the TTS entity reloads (no restart); HTTP 401 triggers re-authentication; Home Assistant's shared HTTP session is reused.
-- Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one; the entity advertises the configured voice's language.
-- Configurable **default volume** in the setup menu; sample rate is shown read-only (Kokoro output is fixed at 24 kHz).
+- Options changes apply immediately — the TTS entity reloads (no restart), and a reauth that swaps the API key reloads it too; HTTP 401 triggers re-authentication on both the regular and streaming paths; Home Assistant's shared HTTP session is reused rather than opened per request.
+- Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one (`jf_alpha` / `hf_alpha` both show as "Alpha"); blended voices survive an accent-filter change.
+- Configurable **default volume** in the setup menu, applied to streaming as well; sample rate is shown read-only (Kokoro output is fixed at 24 kHz).
+- The entity advertises every language Kokoro speaks, and defaults to the configured voice's own language.
+- A unit-test suite that runs without Home Assistant installed, plus CI on Python 3.13 / 3.14.
 
 See the [changelog](CHANGELOG.md) for the full list of changes.
 
@@ -63,7 +64,9 @@ See the [changelog](CHANGELOG.md) for the full list of changes.
 
 - 🔊 Convert text to speech using Kokoro FastAPI  
 - ⚡ Low-latency responses for near real-time playback  
+- 🚀 Streaming synthesis — speech starts on the first sentence, while a conversation agent is still writing  
 - 🎙️ Voice selection with per-call overrides  
+- 🎛️ Voice blending — combine multiple personas (equal or weighted) into a custom voice  
 - 🔧 Configurable server URL and parameters  
 - 🏠 Works with any Home Assistant `media_player` entity  
 - ✅ Connection test during setup — validates server reachability before configuring  
@@ -177,6 +180,17 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | Brazilian Portuguese 🇧🇷 | Male   | Alex   | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/pm_alex.mp3) | pm_alex |
 | Brazilian Portuguese 🇧🇷 | Male   | Santa  | [▶ Play](https://beecho01.github.io/Kokoro-TTS/docs/audio/pm_santa.mp3) | pm_santa |
 
+### 🎛️ Voice Blending
+
+Kokoro FastAPI supports blending multiple voices into a single custom voice. Instead of picking a persona from the dropdown during setup or options configuration, type a custom value into the **Persona** field:
+
+| Syntax | Result |
+|--------|--------|
+| `af_bella+af_sky` | Equal blend of Bella and Sky |
+| `af_bella(2)+af_sky(1)` | Weighted blend — 67% Bella, 33% Sky |
+
+The same syntax works for the per-call `persona` option (see [Per-call option overrides](#per-call-option-overrides)). Blending works best between voices of the same language, since the `lang_code` sent to the API is derived from the first voice's prefix (or from the `language` you've configured).
+
 ### Setup Steps
 
 1. **Add Integration**: Go to `Settings` → `Devices & services` → `Add Integration` → Search for "Kokoro TTS"
@@ -186,11 +200,15 @@ The integration can be configured through Home Assistant's UI with automatic dis
    - **API Key**: Optional authentication key (leave as `not-needed` if not required)
    - The integration will test the connection before proceeding — if it fails, you'll see a specific error message
 
-3. **Voice & Model Selection**:
+3. **Filter Voices** — choose a model and narrow the list before you see it:
    - **Model**: Automatically discovered from `/v1/models` endpoint (defaults to "kokoro")
    - **Language Filter**: Filter personas by language (All Languages, American English, British English, etc.)
    - **Sex Filter**: Filter personas by sex (All, Female, Male)
-   - **Voice/Persona**: Select from filtered list of available personas
+   - Click `Next` — this is a separate step because Home Assistant's setup forms don't
+     live-filter as you change a dropdown; submitting is what applies the filter.
+
+4. **Select Persona** — pick from the list filtered by the previous step:
+   - **Voice/Persona**: Select from the filtered list of available personas
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
    - **Format**: Audio format (mp3, wav, opus, flac, pcm)
    - **Default Volume**: Output volume multiplier (1.0 = unchanged; raise for louder TTS).
@@ -224,6 +242,22 @@ target:
   entity_id: tts.kokoro
 ```
 
+**Streaming (conversation agents)**
+
+When Kokoro is the TTS engine of an Assist pipeline, synthesis starts as soon as the
+conversation agent has finished its **first sentence**, rather than waiting for the
+whole reply. On a multi-sentence answer this hides most of the generation time.
+
+Streaming is automatic — there is nothing to configure. Two things worth knowing:
+
+- Each sentence is synthesised as its own request and the audio is concatenated, so
+  the format must be concatenable. `mp3`, `opus` and `pcm` are; `wav` and `flac`
+  carry a per-file header and are not. If the configured format is not stream-safe,
+  `mp3` is used **for streaming only** — regular `tts.speak` calls keep the format
+  you configured.
+- Non-streaming callers (like the `tts.speak` example above) are unaffected and
+  continue to use the single-request path.
+
 ---
 
 ## 🛠 Troubleshooting
@@ -240,10 +274,15 @@ target:
 
 ### Voice/persona not changing after options update
 
-Options changes take effect immediately without a restart. If the voice doesn't change, try:
+Options changes take effect immediately without a restart. `Configure` is a two-step
+form — a "Filter Voices" step (Model/Voice Accent/Sex) followed by a "Select Persona"
+step. Changing Voice Accent or Sex only takes effect once you click `Next` on that
+first step; the Persona list on the second step is filtered accordingly. If the voice
+doesn't change:
 1. Go to `Settings` → `Devices & Services` → `Kokoro TTS` → `Configure`
-2. Change the persona and click `Submit`
-3. The TTS entity reloads automatically with the new settings
+2. On "Filter Voices", change the accent/sex as needed and click `Next`
+3. On "Select Persona", pick the new persona and click `Submit`
+4. The TTS entity reloads automatically with the new settings
 
 ### Per-call option overrides
 

@@ -34,6 +34,13 @@ def test_derive_persona_info_invalid():
     assert derive_persona_info("af_") is None  # empty name component
 
 
+def test_derive_persona_info_blend_is_unclassifiable():
+    # A blend has no single language/sex. Deriving "American English/Female"
+    # from the first component would hide it behind an unrelated filter.
+    assert derive_persona_info("af_bella+af_sky") is None
+    assert derive_persona_info("af_bella(2)+jf_alpha(1)") is None
+
+
 def test_filter_all_includes_unmapped():
     personas = ["af_heart", "af_unknownvoice", "zz_weird"]
     out = filter_personas_by_language_and_sex(personas, "All Languages", "All")
