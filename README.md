@@ -25,7 +25,7 @@
 - The entity advertises every language Kokoro speaks, and defaults to the configured voice's own language.
 - A unit-test suite that runs without Home Assistant installed, plus CI on Python 3.13 / 3.14.
 
-See the [changelog](CHANGELOG.md) for the full list of changes.
+See the [changelog](CHANGELOG.md) for the full list of changes, and [DIVERSION.md](DIVERSION.md) for how each one maps back to upstream — upstream is welcome to take any of it.
 
 <p align="center">
   <em>
