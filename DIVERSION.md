@@ -1,8 +1,15 @@
 # Where this fork diverges from origin
 
 This fork ([nicandris/Kokoro-TTS](https://github.com/nicandris/Kokoro-TTS)) tracks
-[beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) and was last synced with origin
-`2026.08.15` ([`48014b9`](https://github.com/beecho01/Kokoro-TTS/commit/48014b9)).
+[beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) and is synced with origin
+`2026.08.19` ([`da02338`](https://github.com/beecho01/Kokoro-TTS/commit/da02338)), origin's
+current `main`.
+
+Every finding below was first written against origin
+[`48014b9`](https://github.com/beecho01/Kokoro-TTS/commit/48014b9) (manifest `2026.08.15`) and
+re-verified against `2026.08.19`. Origin changed no integration code between those two commits —
+the eight commits in between are seven README edits and the version bump itself — so all of it
+still applies to origin's current `main`, line references included.
 
 **This document exists so origin can take any of it.** Everything below is offered freely —
 no attribution needed, no PR required, no need to ask. Cherry-pick a commit, copy a function, or
