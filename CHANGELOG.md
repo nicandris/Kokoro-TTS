@@ -2,6 +2,23 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.09.06.1 — Upstream sync 2026.08.19 + test hardening
+
+No change to the integration's own code — this releases the maintenance work that
+landed after `2026.08.16.1`.
+
+- Synced [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) up to
+  `2026.08.19`. Everything upstream added in between is README wording and its own
+  version bump, so nothing functional came across.
+- Added [`DIVERSION.md`](DIVERSION.md), which maps every deliberate difference from
+  upstream back to the origin file it replaces.
+- CI now also runs the suite against the **real** Home Assistant release, not only the
+  stubs in `tests/conftest.py`. The stubs make imports succeed; they cannot catch a
+  signature that has drifted from the real API.
+- That job immediately paid for itself: `TTSAudioRequest`/`TTSAudioResponse` stubs now
+  mirror the real dataclass field order, and the config-flow test stopped shadowing
+  `ConfigFlow.unique_id`, which is read-only upstream.
+
 ## 2026.08.16.1 — Merge upstream 2026.08.15
 
 Syncs [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) up to `2026.08.15`. Several upstream commits re-fix things this fork had already fixed independently (options reload, entry reload, in-repo brand images); those were resolved in favour of the existing implementation.
