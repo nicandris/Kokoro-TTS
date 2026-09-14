@@ -9,6 +9,7 @@ import base64
 import logging
 import re
 
+from homeassistant.components.tts import Voice
 from homeassistant.components.tts.entity import (
     TextToSpeechEntity,
     TTSAudioRequest,
@@ -16,7 +17,7 @@ from homeassistant.components.tts.entity import (
     TtsAudioType,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -38,6 +39,8 @@ from .const import (
     DEFAULT_VOLUME_MULTIPLIER,
     LANG_CODE_TO_HA_LOCALE,
     LANGUAGE_CODE_MAP,
+    LANGUAGE_HA_CODE_MAP,
+    PERSONA_MAPPINGS,
     STREAM_SAFE_FORMATS,
     SUPPORTED_LANGUAGES,
 )
@@ -45,7 +48,11 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # Per-call TTS options exposed to HA services
-SUPPORTED_OPTIONS = ["persona", "speed", "format", "volume_multiplier"]
+# "voice" is Home Assistant's standard option name; an Assist pipeline
+# sends the voice chosen in its settings under that key. It must be listed
+# here or HA rejects the option before _resolve_options() can map it onto
+# "persona", which is what made pipeline voice selection fail.
+SUPPORTED_OPTIONS = ["persona", "voice", "speed", "format", "volume_multiplier"]
 
 # Default entity name
 DEFAULT_NAME = "kokoro"
@@ -200,6 +207,25 @@ class KokoroTTSEntity(TextToSpeechEntity):
         if persona and len(persona) >= 1:
             return persona[0].lower()
         return None
+
+    @callback
+    def async_get_supported_voices(self, language: str) -> list[Voice] | None:
+        """Return the voices Kokoro can speak in `language`.
+
+        Home Assistant calls this to populate the voice picker in an Assist
+        pipeline's settings. Without it the picker is empty and no voice can
+        be chosen per pipeline.
+
+        Every voice for the language is offered. The configured sex filter
+        narrows the options flow's own picker; it deliberately does not hide
+        voices from an explicit per-pipeline override.
+        """
+        voices = [
+            Voice(code, display_name)
+            for code, (lang, _sex, display_name) in PERSONA_MAPPINGS.items()
+            if LANGUAGE_HA_CODE_MAP.get(lang) == language
+        ]
+        return sorted(voices, key=lambda voice: voice.name) or None
 
     def _resolve_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
         """Merge entity defaults with per-call options."""
