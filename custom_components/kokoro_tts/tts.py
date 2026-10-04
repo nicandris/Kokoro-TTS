@@ -219,13 +219,20 @@ class KokoroTTSEntity(TextToSpeechEntity):
         Every voice for the language is offered. The configured sex filter
         narrows the options flow's own picker; it deliberately does not hide
         voices from an explicit per-pipeline override.
+
+        The configured persona comes first: HA gives a new pipeline the first
+        voice in this list, which would otherwise be whichever sorts first
+        ("Adam") instead of the voice chosen in this integration's options.
         """
-        voices = [
-            Voice(code, display_name)
-            for code, (lang, _sex, display_name) in PERSONA_MAPPINGS.items()
-            if LANGUAGE_HA_CODE_MAP.get(lang) == language
-        ]
-        return sorted(voices, key=lambda voice: voice.name) or None
+        voices = sorted(
+            (
+                Voice(code, display_name)
+                for code, (lang, _sex, display_name) in PERSONA_MAPPINGS.items()
+                if LANGUAGE_HA_CODE_MAP.get(lang) == language
+            ),
+            key=lambda voice: (voice.voice_id != self._persona, voice.name),
+        )
+        return voices or None
 
     def _resolve_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
         """Merge entity defaults with per-call options."""

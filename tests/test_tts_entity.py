@@ -91,3 +91,26 @@ def test_lang_code_ignores_all_languages_default():
 def test_handle_http_error_known_and_unknown():
     assert "Authentication failed" in KokoroTTSEntity._handle_http_error(401, "")
     assert KokoroTTSEntity._handle_http_error(418, "teapot").startswith("HTTP 418")
+
+
+def test_voice_is_a_supported_option():
+    # Assist pipelines send their voice under HA's standard "voice" key;
+    # HA rejects any option not listed here before the entity sees it.
+    assert "voice" in _entity()._attr_supported_options
+
+
+def test_supported_voices_lists_only_the_requested_language():
+    voices = _entity().async_get_supported_voices("en-GB")
+    assert voices and all(v.voice_id.startswith("b") for v in voices)
+
+
+def test_supported_voices_puts_configured_persona_first():
+    # HA hands a new pipeline voices[0]; it must be the configured persona.
+    assert _entity(persona="am_michael").async_get_supported_voices("en")[0].voice_id == "am_michael"
+    # A persona from another language leaves the plain name order.
+    voices = _entity(persona="jf_alpha").async_get_supported_voices("en")
+    assert [v.name for v in voices] == sorted(v.name for v in voices)
+
+
+def test_supported_voices_none_for_unknown_language():
+    assert _entity().async_get_supported_voices("de") is None

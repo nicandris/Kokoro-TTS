@@ -129,6 +129,13 @@ def _stub_homeassistant() -> None:
         extension: str
         data_gen: object
 
+    # Mirrors homeassistant.components.tts.Voice (frozen, voice_id then name).
+    @dataclasses.dataclass(frozen=True)
+    class Voice:
+        voice_id: str
+        name: str
+
+    tts_pkg.Voice = Voice
     tts_entity.TextToSpeechEntity = TextToSpeechEntity
     tts_entity.TTSAudioRequest = TTSAudioRequest
     tts_entity.TTSAudioResponse = TTSAudioResponse

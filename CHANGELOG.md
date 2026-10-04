@@ -2,6 +2,20 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.10.04.1 — Assist pipeline voice selection
+
+- An Assist pipeline can now pick a Kokoro voice. HA sends the pipeline's voice under
+  its standard `voice` option, which was missing from the supported options, so HA
+  rejected every request from a pipeline with a voice set ("Invalid options found:
+  ['voice']") ([#14](https://github.com/nicandris/Kokoro-TTS/pull/14), thanks
+  @davidcoulson).
+- The pipeline voice picker is populated: Kokoro now lists its voices per language
+  instead of leaving the dropdown empty.
+- The persona configured in this integration's options is listed first, because HA
+  gives a newly created pipeline the first voice in that list.
+- `tests/conftest.py` stubs `homeassistant.components.tts.Voice`, mirroring the real
+  frozen dataclass.
+
 ## 2026.09.06.1 — Upstream sync 2026.08.19 + test hardening
 
 No change to the integration's own code — this releases the maintenance work that
