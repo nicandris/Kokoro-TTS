@@ -338,3 +338,84 @@ async def test_options_volume_multiplier_prefilled(monkeypatch):
     await flow.async_step_persona()
 
     assert captured["prefill"][CONF_VOLUME_MULTIPLIER] == 2.5
+
+
+# ---------------------------------------------------------------------------
+# Reconfigure
+# ---------------------------------------------------------------------------
+
+class _ReconfigEntry(_FakeEntry):
+    def __init__(self, data, title, entry_id="e1"):
+        super().__init__(data)
+        self.title = title
+        self.entry_id = entry_id
+        self.unique_id = cf._calc_unique_id(data[CONF_BASE_URL])
+
+
+class _ReconfigureFlow(_FlowRecorder, KokoroConfigFlow):
+    def __init__(self, entry, others=()):
+        _FlowRecorder.__init__(self)
+        KokoroConfigFlow.__init__(self)
+        self._entry_obj = entry
+        self._others = list(others)
+        self.updated = None
+
+    def _get_reconfigure_entry(self):
+        return self._entry_obj
+
+    def _async_current_entries(self, include_ignore=True):
+        return [self._entry_obj, *self._others]
+
+    def async_update_reload_and_abort(self, entry, **kwargs):
+        self.updated = kwargs
+        return {"type": "abort", "reason": "reconfigure_successful"}
+
+
+@pytest.fixture
+def _connection(monkeypatch):
+    errors = {}
+
+    async def _fake_test(base_url, api_key):
+        return dict(errors)
+
+    monkeypatch.setattr(cf, "_test_connection", _fake_test)
+    return errors
+
+
+def _reconfig_entry(title="Kokoro TTS (host)"):
+    return _ReconfigEntry(_entry().data, title)
+
+
+async def test_reconfigure_updates_url_key_and_generated_title(_connection):
+    flow = _ReconfigureFlow(_reconfig_entry())
+    result = await flow.async_step_reconfigure(
+        {CONF_BASE_URL: " http://newhost:8880/ ", CONF_API_KEY: "secret"}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert flow.updated == {
+        "title": "Kokoro TTS (newhost)",
+        "data_updates": {CONF_BASE_URL: "http://newhost:8880", CONF_API_KEY: "secret"},
+    }
+
+
+async def test_reconfigure_keeps_a_custom_title(_connection):
+    flow = _ReconfigureFlow(_reconfig_entry(title="Living room voice"))
+    await flow.async_step_reconfigure({CONF_BASE_URL: "http://newhost:8880", CONF_API_KEY: "x"})
+    assert flow.updated["title"] == "Living room voice"
+
+
+async def test_reconfigure_rejects_a_url_another_entry_uses(_connection):
+    other = _ReconfigEntry({**_entry().data, CONF_BASE_URL: "http://other:8880"}, "o", "e2")
+    flow = _ReconfigureFlow(_reconfig_entry(), others=[other])
+    result = await flow.async_step_reconfigure({CONF_BASE_URL: "http://other:8880", CONF_API_KEY: "x"})
+    assert result == {"type": "abort", "reason": "already_configured"}
+    assert flow.updated is None
+
+
+async def test_reconfigure_shows_connection_errors_and_saves_nothing(_connection):
+    _connection[CONF_BASE_URL] = "cannot_connect"
+    flow = _ReconfigureFlow(_reconfig_entry())
+    result = await flow.async_step_reconfigure({CONF_BASE_URL: "http://down:8880", CONF_API_KEY: "x"})
+    assert result["type"] == "form" and result["step_id"] == "reconfigure"
+    assert result["errors"] == {CONF_BASE_URL: "cannot_connect"}
+    assert flow.updated is None

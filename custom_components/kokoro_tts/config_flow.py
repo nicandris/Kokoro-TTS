@@ -261,6 +261,25 @@ def _calc_unique_id(base_url: str) -> str:
     return hashlib.sha256(base_url.encode("utf-8")).hexdigest()[:12]
 
 
+def _entry_title(base_url: str) -> str:
+    """Default entry title, named after the server's host."""
+    return f"Kokoro TTS ({urlparse(base_url).hostname or base_url})"
+
+
+def _validate_base_url(base: str) -> dict[str, str]:
+    """Return form errors for a normalised base URL (empty dict = valid)."""
+    if not base:
+        return {CONF_BASE_URL: "base_url_required"}
+    if not base.startswith(("http://", "https://")):
+        return {CONF_BASE_URL: "invalid_base_url"}
+    try:
+        if not urlparse(base).hostname:
+            return {CONF_BASE_URL: "invalid_base_url"}
+    except ValueError:
+        return {CONF_BASE_URL: "invalid_base_url"}
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
@@ -431,18 +450,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             base = (user_input.get(CONF_BASE_URL) or "").strip().rstrip("/")
 
-            # Validate URL
-            if not base:
-                errors[CONF_BASE_URL] = "base_url_required"
-            elif not base.startswith(("http://", "https://")):
-                errors[CONF_BASE_URL] = "invalid_base_url"
-            else:
-                try:
-                    p = urlparse(base)
-                    if not p.hostname:
-                        errors[CONF_BASE_URL] = "invalid_base_url"
-                except ValueError:
-                    errors[CONF_BASE_URL] = "invalid_base_url"
+            errors = _validate_base_url(base)
 
             if not errors:
                 # Test connection to the server
@@ -525,15 +533,50 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            hostname = urlparse(base_url).hostname or base_url
-            title = f"Kokoro TTS ({hostname})"
-            return self.async_create_entry(title=title, data=data)
+            return self.async_create_entry(title=_entry_title(base_url), data=data)
 
         return self.async_show_form(
             step_id="persona",
             data_schema=_persona_schema(
                 personas, selected_language, selected_sex, self._persona_prefill
             ),
+        )
+
+    async def async_step_reconfigure(self, user_input: dict | None = None):
+        """Change the server URL or API key of an existing entry.
+
+        The entry keeps its unique ID (and its entities theirs, which are bound
+        to the entry ID), so moving the server does not create a new entry.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            base = (user_input.get(CONF_BASE_URL) or "").strip().rstrip("/")
+            api_key = user_input.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+            errors = _validate_base_url(base) or await _test_connection(base, api_key)
+            if not errors:
+                new_id = _calc_unique_id(base)
+                if any(
+                    other.unique_id == new_id
+                    for other in self._async_current_entries(include_ignore=False)
+                    if other.entry_id != entry.entry_id
+                ):
+                    return self.async_abort(reason="already_configured")
+                # Only retitle entries still carrying the generated title.
+                title = entry.title
+                if title == _entry_title(entry.data[CONF_BASE_URL]):
+                    title = _entry_title(base)
+                return self.async_update_reload_and_abort(
+                    entry,
+                    title=title,
+                    data_updates={CONF_BASE_URL: base, CONF_API_KEY: api_key},
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_base_schema(user_input or dict(entry.data)),
+            errors=errors,
         )
 
     async def async_step_reauth(self, entry_data: dict):
@@ -588,9 +631,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
-        hostname = urlparse(base).hostname or base
-        title = f"Kokoro TTS ({hostname})"
-        return self.async_create_entry(title=title, data=user_input)
+        return self.async_create_entry(title=_entry_title(base), data=user_input)
 
 
 # ---------------------------------------------------------------------------
