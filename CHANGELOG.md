@@ -2,6 +2,13 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.10.13 — Reconfigure
+
+- The integration's ⋮ menu now has **Reconfigure**: change the server URL or API key
+  without deleting the entry. The connection is tested before saving; voice and audio
+  settings, the entry and its entities stay as they are. A URL another Kokoro entry
+  already uses is refused, and a title still named after the old host follows the new one.
+
 ## 2026.10.04.1 — Assist pipeline voice selection
 
 - An Assist pipeline can now pick a Kokoro voice. HA sends the pipeline's voice under
