@@ -3,6 +3,8 @@ name: Release on version bump
 on:
   push:
     branches: [main]
+  # Manual run for when GitHub drops a merge's push event (it did on 2026-10-13).
+  workflow_dispatch:
 
 permissions:
   contents: write
