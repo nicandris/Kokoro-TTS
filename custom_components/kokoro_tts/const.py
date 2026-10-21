@@ -191,6 +191,12 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+def playable_format(fmt: str) -> str:
+    """Lower-case the format and replace headerless pcm with wav."""
+    fmt = fmt.lower()
+    return "wav" if fmt == "pcm" else fmt
+
+
 def auth_headers(api_key: str | None) -> dict[str, str]:
     """Bearer header for a real API key; none for the "no key" placeholders."""
     if api_key and api_key not in ("x", DEFAULT_API_KEY):

@@ -31,6 +31,7 @@ from .const import (
     LANGUAGE_OPTIONS,
     PERSONA_MAPPINGS,
     SEX_OPTIONS,
+    playable_format,
 )
 
 # Reverse of LANGUAGE_CODE_MAP: first-letter code -> language display name.
@@ -617,7 +618,8 @@ class KokoroOptionsFlow(_VoiceStepsMixin, config_entries.OptionsFlowWithReload):
         data = {**self.config_entry.data, **(self.config_entry.options or {})}
         prefill: dict[str, Any] = {
             CONF_SPEED: data.get(CONF_SPEED, DEFAULTS[CONF_SPEED]),
-            CONF_FORMAT: data.get(CONF_FORMAT, DEFAULTS[CONF_FORMAT]),
+            # A stored "pcm" is no longer a choice; offering it fails the form.
+            CONF_FORMAT: playable_format(data.get(CONF_FORMAT) or DEFAULTS[CONF_FORMAT]),
             CONF_VOLUME_MULTIPLIER: data.get(
                 CONF_VOLUME_MULTIPLIER, DEFAULTS[CONF_VOLUME_MULTIPLIER]
             ),

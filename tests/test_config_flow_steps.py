@@ -460,3 +460,19 @@ async def test_setup_asks_the_server_for_models_once(monkeypatch):
 def test_yaml_import_step_is_gone():
     # CONFIG_SCHEMA is config-entry-only, so the import step could never run.
     assert not hasattr(KokoroConfigFlow, "async_step_import")
+
+
+async def test_options_prefill_turns_a_stored_pcm_into_wav(monkeypatch):
+    # Regression: pre-filling "pcm", no longer a choice, made submit fail.
+    captured = {}
+
+    def _fake_schema(personas, language, sex, user_input=None):
+        captured["prefill"] = user_input or {}
+        return {}
+
+    monkeypatch.setattr(cf, "_persona_schema", _fake_schema)
+    flow = _OptionsFlow(_entry(**{CONF_FORMAT: "pcm"}))
+    await flow.async_step_init({CONF_LANGUAGE: "American English", CONF_SEX: "Female"})
+    await flow.async_step_persona()
+    assert captured["prefill"][CONF_FORMAT] == "wav"
+    assert captured["prefill"][CONF_FORMAT] in cf._FORMAT_OPTIONS
