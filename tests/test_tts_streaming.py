@@ -14,7 +14,7 @@ from custom_components.kokoro_tts.const import STREAM_SAFE_FORMATS
 from custom_components.kokoro_tts.tts import KokoroTTSEntity, split_sentences
 
 from homeassistant.components.tts.entity import TTSAudioRequest
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import HomeAssistantError
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +215,12 @@ async def test_stream_401_raises_auth_failed(monkeypatch):
     # bad API key never triggered Home Assistant's reauth flow.
     session = _RecordingSession(status=401)
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    started = []
+    entry = type("Entry", (), {"async_start_reauth": lambda self, hass: started.append(hass)})()
 
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _drain(_entity(), ["Hi. "])
+    with pytest.raises(HomeAssistantError):
+        await _drain(_entity(config_entry=entry), ["Hi. "])
+    assert len(started) == 1
 
 
 async def test_stream_server_error_raises_runtime_error(monkeypatch):

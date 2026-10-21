@@ -8,7 +8,7 @@ from custom_components.kokoro_tts.tts import KokoroTTSEntity
 
 # Resolves to the real package or the conftest stub, whichever is installed;
 # tts.py raises the same class, so isinstance/pytest.raises matches either way.
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import HomeAssistantError
 
 
 class _FakeResponse:
@@ -79,12 +79,25 @@ async def test_get_tts_audio_happy_path(monkeypatch):
     assert audio == b"AUDIO"
 
 
-async def test_get_tts_audio_401_raises_auth_failed(monkeypatch):
+class _FakeConfigEntry:
+    def __init__(self):
+        self.reauth_started_with = None
+
+    def async_start_reauth(self, hass):
+        self.reauth_started_with = hass
+
+
+async def test_get_tts_audio_401_starts_reauth(monkeypatch):
+    # Regression: ConfigEntryAuthFailed raised from a TTS call never started
+    # reauth - HA only acts on it during entry setup.
     session = _FakeSession(_FakeResponse(status=401, text="nope"))
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    entry = _FakeConfigEntry()
+    entity = _entity(config_entry=entry)
 
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _entity().async_get_tts_audio("hello", "en")
+    with pytest.raises(HomeAssistantError, match="Authentication failed"):
+        await entity.async_get_tts_audio("hello", "en")
+    assert entry.reauth_started_with is entity.hass
 
 
 async def test_get_tts_audio_server_error_raises_runtime_error(monkeypatch):

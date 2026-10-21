@@ -80,9 +80,13 @@ def _stub_homeassistant() -> None:
 
     exceptions = _mod("homeassistant.exceptions")
 
-    class ConfigEntryAuthFailed(Exception):
+    class HomeAssistantError(Exception):
         pass
 
+    class ConfigEntryAuthFailed(HomeAssistantError):
+        pass
+
+    exceptions.HomeAssistantError = HomeAssistantError
     exceptions.ConfigEntryAuthFailed = ConfigEntryAuthFailed
 
     helpers = _mod("homeassistant.helpers")

@@ -18,7 +18,7 @@ from homeassistant.components.tts.entity import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -119,6 +119,7 @@ async def async_setup_entry(
         fmt=fmt,
         language=language,
         volume_multiplier=volume_multiplier,
+        config_entry=config_entry,
     )
     async_add_entities([entity])
 
@@ -138,9 +139,11 @@ class KokoroTTSEntity(TextToSpeechEntity):
         fmt: str,
         language: str | None = None,
         volume_multiplier: float = DEFAULT_VOLUME_MULTIPLIER,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         """Initialize the TTS entity."""
         super().__init__()
+        self._config_entry = config_entry
         self._attr_name = name
         # Tie the unique_id to the config entry so multiple servers don't collide.
         self._attr_unique_id = unique_id
@@ -195,8 +198,9 @@ class KokoroTTSEntity(TextToSpeechEntity):
     async def _raise_for_status(self, response: aiohttp.ClientResponse) -> None:
         """Raise a useful exception for a non-200 response.
 
-        Shared by the buffered and streaming paths so a 401 drives Home
-        Assistant's reauth flow in both, rather than only the buffered one.
+        Shared by the buffered and streaming paths so a 401 starts Home
+        Assistant's reauth flow in both. Raising ConfigEntryAuthFailed here
+        would not: HA only acts on it during entry setup.
         """
         if response.status == 200:
             return
@@ -205,10 +209,10 @@ class KokoroTTSEntity(TextToSpeechEntity):
         _LOGGER.warning(
             "Kokoro TTS API error %d: %s", response.status, error_text[:200]
         )
-        # Report 401s with HA's auth-failure exception (correct type, and lets
-        # HA drive the reauth flow for this entry).
         if response.status == 401:
-            raise ConfigEntryAuthFailed("Authentication failed - check your API key")
+            if self._config_entry is not None:
+                self._config_entry.async_start_reauth(self.hass)
+            raise HomeAssistantError("Authentication failed - check your API key")
         raise RuntimeError(self._handle_http_error(response.status, error_text))
 
     def _get_lang_code(
