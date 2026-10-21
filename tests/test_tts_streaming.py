@@ -66,7 +66,6 @@ class _RecordingSession:
 def _entity(**overrides):
     kwargs = dict(
         unique_id="entry-abc",
-        name="kokoro",
         base_url="http://host:8880",
         api_key="secret",
         model="kokoro",
@@ -216,7 +215,15 @@ async def test_stream_401_raises_auth_failed(monkeypatch):
     session = _RecordingSession(status=401)
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
     started = []
-    entry = type("Entry", (), {"async_start_reauth": lambda self, hass: started.append(hass)})()
+    entry = type(
+        "Entry",
+        (),
+        {
+            "entry_id": "entry-abc",
+            "title": "Kokoro TTS (host)",
+            "async_start_reauth": lambda self, hass: started.append(hass),
+        },
+    )()
 
     with pytest.raises(HomeAssistantError):
         await _drain(_entity(config_entry=entry), ["Hi. "])

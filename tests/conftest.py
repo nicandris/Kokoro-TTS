@@ -111,6 +111,15 @@ def _stub_homeassistant() -> None:
     aiohttp_client.async_get_clientsession = async_get_clientsession
     helpers.aiohttp_client = aiohttp_client
 
+    device_registry = _mod("homeassistant.helpers.device_registry")
+
+    class DeviceEntryType:
+        SERVICE = "service"
+
+    device_registry.DeviceEntryType = DeviceEntryType
+    device_registry.DeviceInfo = dict
+    helpers.device_registry = device_registry
+
     components = _mod("homeassistant.components")
     tts_pkg = _mod("homeassistant.components.tts")
     tts_entity = _mod("homeassistant.components.tts.entity")

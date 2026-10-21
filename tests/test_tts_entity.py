@@ -8,7 +8,6 @@ from custom_components.kokoro_tts.tts import KokoroTTSEntity
 def _entity(**overrides):
     kwargs = dict(
         unique_id="entry-abc",
-        name="kokoro",
         base_url="http://host:8880",
         api_key="not-needed",
         model="kokoro",
@@ -182,3 +181,18 @@ async def test_refresh_voices_uses_shared_session(monkeypatch):
     entity.hass = object()
     await entity.async_refresh_voices()
     assert entity._server_voices == ["af_brandnew"]
+
+
+def test_entity_is_named_after_a_per_entry_device():
+    # Regression: no has_entity_name/device_info, so a second server became
+    # tts.kokoro_2 instead of being named after its entry.
+    class _Entry:
+        entry_id = "entry-9"
+        title = "Kokoro TTS (kitchen)"
+
+    entity = _entity(config_entry=_Entry())
+    assert entity._attr_has_entity_name is True
+    assert entity._attr_name is None
+    info = entity._attr_device_info
+    assert info["identifiers"] == {("kokoro_tts", "entry-9")}
+    assert info["name"] == "Kokoro TTS (kitchen)"

@@ -63,7 +63,6 @@ class _FakeSession:
 def _entity(**overrides):
     kwargs = dict(
         unique_id="entry-abc",
-        name="kokoro",
         base_url="http://host:8880",
         api_key="secret",
         model="kokoro",
@@ -90,6 +89,9 @@ async def test_get_tts_audio_happy_path(monkeypatch):
 
 
 class _FakeConfigEntry:
+    entry_id = "entry-abc"
+    title = "Kokoro TTS (host)"
+
     def __init__(self):
         self.reauth_started_with = None
 

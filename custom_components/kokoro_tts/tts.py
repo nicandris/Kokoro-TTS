@@ -20,6 +20,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
 from .api import async_fetch_voices
 from .config_flow import derive_persona_info
@@ -39,6 +40,7 @@ from .const import (
     DEFAULT_SPEED,
     DEFAULT_STREAM_FORMAT,
     DEFAULT_VOLUME_MULTIPLIER,
+    DOMAIN,
     LANG_CODE_TO_HA_LOCALE,
     LANGUAGE_CODE_MAP,
     LANGUAGE_HA_CODE_MAP,
@@ -56,9 +58,6 @@ _LOGGER = logging.getLogger(__name__)
 # here or HA rejects the option before _resolve_options() can map it onto
 # "persona", which is what made pipeline voice selection fail.
 SUPPORTED_OPTIONS = ["persona", "voice", "speed", "format", "volume_multiplier"]
-
-# Default entity name
-DEFAULT_NAME = "kokoro"
 
 # Size of the audio chunks yielded while streaming a sentence.
 STREAM_CHUNK_BYTES = 4096
@@ -135,8 +134,6 @@ async def async_setup_entry(
     # Options override data
     merged = {**config_data, **options}
 
-    # No "name" field is collected in the config flow, so use the default.
-    name = DEFAULT_NAME
     base_url = merged[CONF_BASE_URL].rstrip("/")
     api_key = merged.get(CONF_API_KEY, DEFAULT_API_KEY) or DEFAULT_API_KEY
     model = merged.get(CONF_MODEL, DEFAULT_MODEL)
@@ -148,7 +145,6 @@ async def async_setup_entry(
 
     entity = KokoroTTSEntity(
         unique_id=config_entry.entry_id,
-        name=name,
         base_url=base_url,
         api_key=api_key,
         model=model,
@@ -172,7 +168,6 @@ class KokoroTTSEntity(TextToSpeechEntity):
     def __init__(
         self,
         unique_id: str,
-        name: str,
         base_url: str,
         api_key: str,
         model: str,
@@ -188,7 +183,17 @@ class KokoroTTSEntity(TextToSpeechEntity):
         self._config_entry = config_entry
         # Filled by async_refresh_voices; the built-in list is used meanwhile.
         self._server_voices: list[str] = []
-        self._attr_name = name
+        # Named after a per-entry service device, so two servers get distinct
+        # entity ids from their titles instead of tts.kokoro / tts.kokoro_2.
+        self._attr_has_entity_name = True
+        self._attr_name = None
+        if config_entry is not None:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, config_entry.entry_id)},
+                name=config_entry.title,
+                manufacturer="Kokoro FastAPI",
+                entry_type=DeviceEntryType.SERVICE,
+            )
         # Tie the unique_id to the config entry so multiple servers don't collide.
         self._attr_unique_id = unique_id
         self._base_url = base_url
