@@ -8,6 +8,7 @@ import asyncio
 import aiohttp
 import logging
 import re
+from urllib.parse import urlparse
 
 from homeassistant.components.tts import Voice
 from homeassistant.components.tts.entity import (
@@ -148,7 +149,8 @@ async def async_setup_entry(
         _LOGGER.warning(
             "Kokoro TTS at %s uses an API key over plain http; the key is sent "
             "in cleartext. Use https if the server is not on a trusted network",
-            base_url,
+            # Host only: an entry from an older version may carry user:pw@.
+            urlparse(base_url).hostname,
         )
 
     entity = KokoroTTSEntity(

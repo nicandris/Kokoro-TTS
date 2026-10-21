@@ -73,3 +73,11 @@ async def test_api_key_over_plain_http_is_warned_about(caplog):
     await tts.async_setup_entry(None, _TtsEntry("https://host:8880", "secret"), added.extend)
     await tts.async_setup_entry(None, _TtsEntry("http://host:8880", "not-needed"), added.extend)
     assert "cleartext" not in caplog.text
+
+
+async def test_cleartext_warning_logs_the_host_only(caplog):
+    from custom_components.kokoro_tts import tts
+
+    await tts.async_setup_entry(None, _TtsEntry("http://bob:hunter2@host:8880", "secret"), [].extend)
+    assert "host" in caplog.text
+    assert "hunter2" not in caplog.text and "bob" not in caplog.text
