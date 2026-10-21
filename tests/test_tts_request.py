@@ -11,11 +11,21 @@ from custom_components.kokoro_tts.tts import KokoroTTSEntity
 from homeassistant.exceptions import HomeAssistantError
 
 
+class _FakeContent:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    async def iter_chunked(self, size: int):
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
+
+
 class _FakeResponse:
     def __init__(self, status=200, body=b"AUDIO", content_type="audio/mpeg",
                  json_data=None, text="error-body"):
         self.status = status
         self._body = body
+        self.content = _FakeContent(body)
         self.headers = {"content-type": content_type}
         self._json = json_data
         self._text = text
@@ -137,3 +147,22 @@ async def test_request_sends_the_voices_own_lang_code(monkeypatch):
         "hi", "en", {"voice": "jf_alpha"}
     )
     assert session.last_json["lang_code"] == "j"
+
+
+async def test_json_response_is_not_followed(monkeypatch):
+    # Regression: a JSON body with a download_url used to be fetched (SSRF).
+    session = _FakeSession(
+        _FakeResponse(body=b'{"download_url": "http://169.254.169.254/"}',
+                      content_type="application/json")
+    )
+    session.get = lambda *a, **k: pytest.fail("followed a server-supplied URL")
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_oversized_response_is_refused(monkeypatch):
+    monkeypatch.setattr(tts, "MAX_AUDIO_BYTES", 10)
+    session = _FakeSession(_FakeResponse(body=b"x" * 11))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(Exception, match="exceeds"):
+        await _entity().async_get_tts_audio("hi", "en")

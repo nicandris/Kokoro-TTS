@@ -5,7 +5,6 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import aiohttp
-import base64
 import logging
 import re
 
@@ -60,6 +59,9 @@ DEFAULT_NAME = "kokoro"
 
 # Size of the audio chunks yielded while streaming a sentence.
 STREAM_CHUNK_BYTES = 4096
+
+# Upper bound on one response body (about 9 minutes of 24 kHz 16-bit wav).
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 # A sentence ends on terminal punctuation followed by whitespace. Requiring the
 # trailing whitespace keeps decimals ("12.5") and mid-generation abbreviations
@@ -331,39 +333,33 @@ class KokoroTTSEntity(TextToSpeechEntity):
         ) as response:
             await self._raise_for_status(response)
 
-            content_type = response.headers.get("content-type", "").lower()
-
-            if "application/json" in content_type:
-                data = await response.json()
-                if isinstance(data, dict):
-                    if "audio" in data:
-                        audio_bytes = base64.b64decode(data["audio"])
-                    elif "download_url" in data:
-                        download_url = data["download_url"]
-                        async with session.get(
-                            download_url,
-                            timeout=aiohttp.ClientTimeout(total=30),
-                        ) as dl_resp:
-                            if dl_resp.status != 200:
-                                raise RuntimeError(
-                                    f"Failed to download audio: HTTP {dl_resp.status}"
-                                )
-                            audio_bytes = await dl_resp.read()
-                    else:
-                        raise RuntimeError(
-                            f"JSON response missing audio fields: {list(data.keys())}"
-                        )
-                else:
-                    raise RuntimeError("Unexpected JSON response type")
-            else:
-                # Binary audio response (most common)
-                audio_bytes = await response.read()
+            # Kokoro answers /v1/audio/speech with raw audio. The old JSON
+            # "audio"/"download_url" handling was unreachable, and following a
+            # server-supplied URL was an SSRF path.
+            audio_bytes = b"".join(
+                [chunk async for chunk in self._async_read_capped(response)]
+            )
 
             if not audio_bytes:
                 raise RuntimeError("Received empty audio data")
 
             _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
             return fmt, audio_bytes
+
+    @staticmethod
+    async def _async_read_capped(
+        response: aiohttp.ClientResponse,
+    ) -> AsyncGenerator[bytes]:
+        """Yield the response body, refusing more than MAX_AUDIO_BYTES."""
+        total = 0
+        async for chunk in response.content.iter_chunked(STREAM_CHUNK_BYTES):
+            total += len(chunk)
+            if total > MAX_AUDIO_BYTES:
+                raise RuntimeError(
+                    f"Kokoro response exceeds {MAX_AUDIO_BYTES} bytes, aborting"
+                )
+            if chunk:
+                yield chunk
 
     def async_supports_streaming_input(self) -> bool:
         """Return True - text can be consumed as it is generated.
@@ -452,6 +448,5 @@ class KokoroTTSEntity(TextToSpeechEntity):
         ) as response:
             await self._raise_for_status(response)
 
-            async for chunk in response.content.iter_chunked(STREAM_CHUNK_BYTES):
-                if chunk:
-                    yield chunk
+            async for chunk in self._async_read_capped(response):
+                yield chunk
