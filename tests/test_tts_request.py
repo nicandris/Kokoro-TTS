@@ -115,3 +115,12 @@ async def test_per_call_volume_overrides_default(monkeypatch):
         "hi", "en", {"volume_multiplier": 3.0}
     )
     assert session.last_json["volume_multiplier"] == 3.0
+
+
+async def test_request_sends_the_voices_own_lang_code(monkeypatch):
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity(language="American English").async_get_tts_audio(
+        "hi", "en", {"voice": "jf_alpha"}
+    )
+    assert session.last_json["lang_code"] == "j"

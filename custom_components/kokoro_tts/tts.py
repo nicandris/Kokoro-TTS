@@ -64,6 +64,10 @@ STREAM_CHUNK_BYTES = 4096
 # A sentence ends on terminal punctuation followed by whitespace. Requiring the
 # trailing whitespace keeps decimals ("12.5") and mid-generation abbreviations
 # from being treated as sentence boundaries.
+# Kokoro voice codes are "<lang><sex>_<name>"; a blend starts with one.
+VOICE_PREFIX_PATTERN = re.compile(r"([a-z])[fm]_")
+HA_LOCALE_TO_LANG_CODE = {locale: code for code, locale in LANG_CODE_TO_HA_LOCALE.items()}
+
 SENTENCE_END_PATTERN = re.compile(r"[.!?…]+[\"'”’)\]]*\s+")
 
 
@@ -152,9 +156,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         # Advertise every language Kokoro can speak: Home Assistant hides the
         # entity from any pipeline whose language is not listed here.
         self._attr_supported_languages = SUPPORTED_LANGUAGES
-        # Default to the configured voice's own locale. _get_lang_code prefers
-        # the language filter and falls back to the voice code prefix, so this
-        # stays correct when the filter is "All Languages".
+        # Default to the configured voice's own locale, else the accent filter.
         self._attr_default_language = LANG_CODE_TO_HA_LOCALE.get(
             self._get_lang_code(persona) or "", DEFAULT_HA_LANGUAGE
         )
@@ -209,18 +211,22 @@ class KokoroTTSEntity(TextToSpeechEntity):
             raise ConfigEntryAuthFailed("Authentication failed - check your API key")
         raise RuntimeError(self._handle_http_error(response.status, error_text))
 
-    def _get_lang_code(self, persona: str | None) -> str | None:
-        """Determine the lang_code to send to the API.
+    def _get_lang_code(
+        self, persona: str | None, language: str | None = None
+    ) -> str | None:
+        """Determine the single-letter lang_code to send to the API.
 
-        Priority: configured language > first letter of voice name.
-        The API uses single-letter codes: a, b, j, z, e, f, h, i, p.
+        Priority: the voice's own prefix ("jf_alpha" -> "j", also the first
+        voice of a blend) > the request's HA language > the accent filter.
+        The accent filter only narrows the picker; it must never give a
+        Japanese voice English phonemes. Unknown letters are never sent.
         """
-        if self._language and self._language in LANGUAGE_CODE_MAP:
-            return LANGUAGE_CODE_MAP[self._language]
-        # Fallback: derive from voice name prefix (e.g. "af_heart" -> "a")
-        if persona and len(persona) >= 1:
-            return persona[0].lower()
-        return None
+        if persona and (match := VOICE_PREFIX_PATTERN.match(persona.lower())):
+            if match.group(1) in LANG_CODE_TO_HA_LOCALE:
+                return match.group(1)
+        if language in HA_LOCALE_TO_LANG_CODE:
+            return HA_LOCALE_TO_LANG_CODE[language]
+        return LANGUAGE_CODE_MAP.get(self._language or "")
 
     @callback
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
@@ -248,10 +254,13 @@ class KokoroTTSEntity(TextToSpeechEntity):
         )
         return voices or None
 
-    def _resolve_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
+    def _resolve_options(
+        self, options: dict[str, Any] | None, language: str | None = None
+    ) -> dict[str, Any]:
         """Merge entity defaults with per-call options."""
         opts = options or {}
         return {
+            "language": language,
             "persona": opts.get("persona", opts.get("voice", self._persona)),
             "speed": float(opts.get("speed", self._speed)),
             "fmt": (opts.get("format", self._fmt) or self._fmt).lower(),
@@ -278,7 +287,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         }
 
         # Add lang_code if we can determine one
-        lang_code = self._get_lang_code(persona)
+        lang_code = self._get_lang_code(persona, resolved.get("language"))
         if lang_code:
             payload["lang_code"] = lang_code
 
@@ -303,7 +312,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         if not message.strip():
             raise ValueError("Message cannot be empty")
 
-        resolved = self._resolve_options(options)
+        resolved = self._resolve_options(options, language)
         fmt = resolved["fmt"]
         payload = self._build_payload(message, resolved, stream=False)
         timeout = aiohttp.ClientTimeout(total=60, connect=10)
@@ -365,7 +374,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         self, request: TTSAudioRequest
     ) -> TTSAudioResponse:
         """Stream audio, synthesising each sentence as soon as it is complete."""
-        resolved = self._resolve_options(request.options)
+        resolved = self._resolve_options(request.options, request.language)
         fmt = resolved["fmt"]
 
         # Streaming issues one request per sentence and concatenates the audio.

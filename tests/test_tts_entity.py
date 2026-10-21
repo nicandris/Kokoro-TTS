@@ -41,10 +41,12 @@ def test_default_language_follows_persona():
     assert _entity(persona="pf_dora")._attr_default_language == "pt-BR"
 
 
-def test_default_language_uses_configured_accent_override():
-    # The configured Voice Accent wins over the persona prefix.
+def test_default_language_follows_voice_over_accent_filter():
+    # The accent filter only narrows the picker; the voice decides.
     entity = _entity(persona="af_heart", language="Mandarin Chinese")
-    assert entity._attr_default_language == "zh"
+    assert entity._attr_default_language == "en"
+    # With no classifiable voice the filter is the fallback.
+    assert _entity(persona="custom", language="Mandarin Chinese")._attr_default_language == "zh"
 
 
 def test_default_language_is_always_advertised():
@@ -66,10 +68,25 @@ def test_unique_id_comes_from_entry_id():
     assert _entity(unique_id="entry-2")._attr_unique_id == "entry-2"
 
 
-def test_lang_code_prefers_configured_language():
-    entity = _entity(language="British English")
-    # Configured language wins over the persona prefix ("af_" -> "a").
-    assert entity._get_lang_code("af_heart") == "b"
+def test_lang_code_prefers_the_voice_over_the_accent_filter():
+    # Regression: a Japanese voice under an English filter got English phonemes.
+    entity = _entity(language="American English")
+    assert entity._get_lang_code("jf_alpha") == "j"
+    assert entity._get_lang_code("af_bella+af_sky") == "a"
+
+
+def test_lang_code_uses_request_language_then_filter_for_unknown_voices():
+    entity = _entity(language="Spanish")
+    assert entity._get_lang_code("custom_voice", "ja") == "j"
+    assert entity._get_lang_code("custom_voice", "de") == "e"
+    assert entity._get_lang_code("custom_voice") == "e"
+
+
+def test_lang_code_never_sends_an_unknown_letter():
+    # Regression: the first letter was sent unchecked ("custom" -> "c").
+    entity = _entity(language=None)
+    assert entity._get_lang_code("custom") is None
+    assert entity._get_lang_code("qf_foo") is None
 
 
 def test_lang_code_falls_back_to_persona_prefix():
