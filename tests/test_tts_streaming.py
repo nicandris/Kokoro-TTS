@@ -165,7 +165,7 @@ async def test_stream_falls_back_to_safe_format_for_wav(monkeypatch):
     session = _RecordingSession()
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    response, _audio = await _drain(_entity(fmt="wav"), ["Hi. "])
+    response, _audio = await _drain(_entity(fmt="wav"), ["Hi. ", "Bye. "])
 
     assert response.extension in STREAM_SAFE_FORMATS
     assert response.extension == "mp3"
@@ -185,7 +185,7 @@ async def test_stream_requests_set_stream_flag(monkeypatch):
     session = _RecordingSession()
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    await _drain(_entity(), ["Hi. "])
+    await _drain(_entity(), ["Hi. ", "Bye. "])
 
     assert session.posts[0]["json"]["stream"] is True
 
@@ -252,3 +252,31 @@ async def test_stream_uses_shared_session(monkeypatch):
     # One shared session for the whole stream, reused across both sentences.
     assert len(calls) == 1
     assert len(session.posts) == 2
+
+
+# ---------------------------------------------------------------------------
+# Full message vs real stream (HA sends both through async_stream_tts_audio)
+# ---------------------------------------------------------------------------
+
+async def test_full_message_uses_single_request_in_configured_format(monkeypatch):
+    # Regression: HA routes a plain tts.speak here as a one-chunk stream, which
+    # forced wav/flac to mp3 and split the message into per-sentence requests.
+    session = _RecordingSession()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    response, audio = await _drain(_entity(fmt="wav"), ["One. Two. Three."])
+
+    assert response.extension == "wav"
+    assert session.messages == ["One. Two. Three."]
+    assert session.posts[0]["json"]["stream"] is False
+    assert audio == b"AUDIO"
+
+
+async def test_real_stream_still_goes_per_sentence(monkeypatch):
+    session = _RecordingSession()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    response, _audio = await _drain(_entity(fmt="flac"), ["One. Tw", "o."])
+
+    assert response.extension == "mp3"
+    assert session.messages == ["One.", "Two."]

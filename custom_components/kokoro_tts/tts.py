@@ -372,16 +372,40 @@ class KokoroTTSEntity(TextToSpeechEntity):
     def async_supports_streaming_input(self) -> bool:
         """Return True - text can be consumed as it is generated.
 
-        This lets the Assist pipeline forward the conversation agent's output as
-        it arrives instead of buffering the whole reply, so synthesis can start
-        on the first finished sentence.
+        HA decides on this flag alone: once it is True, every request -
+        including a plain tts.speak - arrives through async_stream_tts_audio,
+        a full message as a one-chunk stream. async_stream_tts_audio therefore
+        sends one-chunk input down the single-request path itself.
         """
         return True
 
     async def async_stream_tts_audio(
         self, request: TTSAudioRequest
     ) -> TTSAudioResponse:
-        """Stream audio, synthesising each sentence as soon as it is complete."""
+        """Synthesise a full message in one request, a real stream per sentence."""
+        text_gen = request.message_gen
+        first = await anext(text_gen, None)
+        # ponytail: peeking the second chunk waits for the agent's next delta
+        # (milliseconds) before streaming starts; HA passes no "is a stream" flag.
+        second = await anext(text_gen, None)
+        if second is None:
+            # tts.speak, or a pipeline reply too short for HA to stream: one
+            # request, in the configured format (wav/flac included).
+            extension, data = await self.async_get_tts_audio(
+                first or "", request.language, request.options
+            )
+
+            async def _single() -> AsyncGenerator[bytes]:
+                yield data
+
+            return TTSAudioResponse(extension=extension, data_gen=_single())
+
+        async def _rest() -> AsyncGenerator[str]:
+            yield first
+            yield second
+            async for chunk in text_gen:
+                yield chunk
+
         resolved = self._resolve_options(request.options, request.language)
         fmt = resolved["fmt"]
 
@@ -399,7 +423,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
         return TTSAudioResponse(
             extension=fmt,
-            data_gen=self._async_stream_audio(request.message_gen, resolved),
+            data_gen=self._async_stream_audio(_rest(), resolved),
         )
 
     async def _async_stream_audio(

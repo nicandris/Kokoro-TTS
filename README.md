@@ -252,10 +252,12 @@ Streaming is automatic — there is nothing to configure. Two things worth knowi
 - Each sentence is synthesised as its own request and the audio is concatenated, so
   the format must be concatenable. `mp3` and `opus` are; `wav` and `flac`
   carry a per-file header and are not. If the configured format is not stream-safe,
-  `mp3` is used **for streaming only** — regular `tts.speak` calls keep the format
-  you configured.
-- Non-streaming callers (like the `tts.speak` example above) are unaffected and
-  continue to use the single-request path.
+  `mp3` is used **for streaming only**.
+- Only a reply that Home Assistant actually streams (a long conversation-agent
+  answer) takes the per-sentence path. A full message — `tts.speak` like the example
+  above, or a short Assist reply — is synthesised in a single request in the format
+  you configured. (Home Assistant may still transcode that audio, e.g. to `mp3` for
+  a media player, unless the caller asks for a specific format.)
 
 ---
 
