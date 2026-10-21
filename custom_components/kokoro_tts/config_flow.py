@@ -40,6 +40,9 @@ _LOGGER = logging.getLogger(__name__)
 
 _FORMAT_OPTIONS = ["mp3", "wav", "opus", "flac"]
 
+# The API key is a secret: masked in the form.
+_PASSWORD_SELECTOR = selector.selector({"text": {"type": "password"}})
+
 # Transient, wizard-only field - never stored in the config entry. Lets the
 # persona step send the user back to the filter step.
 CONF_CHANGE_FILTERS = "change_filters"
@@ -186,7 +189,10 @@ def _validate_base_url(base: str) -> dict[str, str]:
     if not base.startswith(("http://", "https://")):
         return {CONF_BASE_URL: "invalid_base_url"}
     try:
-        if not urlparse(base).hostname:
+        parsed = urlparse(base)
+        # Userinfo ("http://user:pw@host") would be stored and logged in the
+        # URL; the API key field is the place for credentials.
+        if not parsed.hostname or parsed.username or parsed.password:
             return {CONF_BASE_URL: "invalid_base_url"}
     except ValueError:
         return {CONF_BASE_URL: "invalid_base_url"}
@@ -207,7 +213,7 @@ def _base_schema(user_input: dict | None = None) -> vol.Schema:
             ): str,
             vol.Optional(
                 CONF_API_KEY, default=ui.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-            ): str,
+            ): _PASSWORD_SELECTOR,
         }
     )
 
@@ -535,7 +541,9 @@ class KokoroConfigFlow(_VoiceStepsMixin, config_entries.ConfigFlow, domain=DOMAI
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Optional(CONF_API_KEY, default=self._base_info.get(CONF_API_KEY, "")): str,
+                    vol.Optional(
+                        CONF_API_KEY, default=self._base_info.get(CONF_API_KEY, "")
+                    ): _PASSWORD_SELECTOR,
                 }
             ),
             errors=errors,

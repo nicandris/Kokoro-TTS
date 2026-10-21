@@ -48,3 +48,28 @@ async def test_setup_entry_forwards_tts_without_an_update_listener():
 def test_options_flow_reloads_the_entry_itself():
     # With no listener, saving options must still rebuild the TTS entity.
     assert issubclass(KokoroOptionsFlow, OptionsFlowWithReload)
+
+
+class _TtsEntry:
+    entry_id = "entry-1"
+    title = "Kokoro TTS (host)"
+    options = {}
+
+    def __init__(self, base_url, api_key):
+        self.data = {"base_url": base_url, "api_key": api_key, "persona": "af_heart"}
+
+    def async_create_background_task(self, hass, target, name):
+        target.close()
+
+
+async def test_api_key_over_plain_http_is_warned_about(caplog):
+    from custom_components.kokoro_tts import tts
+
+    added = []
+    await tts.async_setup_entry(None, _TtsEntry("http://host:8880", "secret"), added.extend)
+    assert "cleartext" in caplog.text and len(added) == 1
+
+    caplog.clear()
+    await tts.async_setup_entry(None, _TtsEntry("https://host:8880", "secret"), added.extend)
+    await tts.async_setup_entry(None, _TtsEntry("http://host:8880", "not-needed"), added.extend)
+    assert "cleartext" not in caplog.text

@@ -230,11 +230,11 @@ async def test_stream_401_raises_auth_failed(monkeypatch):
     assert len(started) == 1
 
 
-async def test_stream_server_error_raises_runtime_error(monkeypatch):
+async def test_stream_server_error_raises_ha_error(monkeypatch):
     session = _RecordingSession(status=500)
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HomeAssistantError):
         await _drain(_entity(), ["Hi. "])
 
 
@@ -330,3 +330,11 @@ async def test_stream_synthesises_next_sentence_while_current_plays(monkeypatch)
     )
     assert audio == b"ONE" + b"AUDIO" * 2
     assert session.messages == ["One.", "Two.", "Three."]
+
+
+async def test_stream_with_no_audio_is_an_ha_error(monkeypatch):
+    # Regression: a stream of empty responses "succeeded" with no audio.
+    session = _RecordingSession(body=b"")
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(HomeAssistantError, match="empty audio"):
+        await _drain(_entity(), ["One. ", "Two."])

@@ -143,6 +143,13 @@ async def async_setup_entry(
     language = merged.get(CONF_LANGUAGE)
     volume_multiplier = float(merged.get(CONF_VOLUME_MULTIPLIER, DEFAULT_VOLUME_MULTIPLIER))
 
+    if base_url.startswith("http://") and auth_headers(api_key):
+        _LOGGER.warning(
+            "Kokoro TTS at %s uses an API key over plain http; the key is sent "
+            "in cleartext. Use https if the server is not on a trusted network",
+            base_url,
+        )
+
     entity = KokoroTTSEntity(
         unique_id=config_entry.entry_id,
         base_url=base_url,
@@ -262,7 +269,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
             if self._config_entry is not None:
                 self._config_entry.async_start_reauth(self.hass)
             raise HomeAssistantError("Authentication failed - check your API key")
-        raise RuntimeError(self._handle_http_error(response.status, error_text))
+        raise HomeAssistantError(self._handle_http_error(response.status, error_text))
 
     def _get_lang_code(
         self, persona: str | None, language: str | None = None
@@ -383,7 +390,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
     ) -> TtsAudioType:
         """Get TTS audio from Kokoro API."""
         if not message.strip():
-            raise ValueError("Message cannot be empty")
+            raise HomeAssistantError("Message cannot be empty")
 
         resolved = self._resolve_options(options, language)
         fmt = resolved["fmt"]
@@ -392,26 +399,39 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
         # Reuse Home Assistant's shared aiohttp session (pooled, not closed here).
         session = async_get_clientsession(self.hass)
-        async with session.post(
-            self._speech_url,
-            json=payload,
-            headers=self._build_headers(),
-            timeout=timeout,
-        ) as response:
-            await self._raise_for_status(response)
+        audio_bytes = b"".join(
+            [chunk async for chunk in self._async_post_audio(session, payload, timeout)]
+        )
+        if not audio_bytes:
+            raise HomeAssistantError("Kokoro returned empty audio")
 
-            # Kokoro answers /v1/audio/speech with raw audio. The old JSON
-            # "audio"/"download_url" handling was unreachable, and following a
-            # server-supplied URL was an SSRF path.
-            audio_bytes = b"".join(
-                [chunk async for chunk in self._async_read_capped(response)]
-            )
+        _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
+        return fmt, audio_bytes
 
-            if not audio_bytes:
-                raise RuntimeError("Received empty audio data")
+    async def _async_post_audio(
+        self,
+        session: aiohttp.ClientSession,
+        payload: dict[str, Any],
+        timeout: aiohttp.ClientTimeout,
+    ) -> AsyncGenerator[bytes]:
+        """POST /v1/audio/speech and yield the audio; failures as HomeAssistantError.
 
-            _LOGGER.debug("TTS audio generated: %d bytes, format: %s", len(audio_bytes), fmt)
-            return fmt, audio_bytes
+        Kokoro answers with raw audio. The old JSON "audio"/"download_url"
+        handling was unreachable, and following a server-supplied URL was an
+        SSRF path.
+        """
+        try:
+            async with session.post(
+                self._speech_url,
+                json=payload,
+                headers=self._build_headers(),
+                timeout=timeout,
+            ) as response:
+                await self._raise_for_status(response)
+                async for chunk in self._async_read_capped(response):
+                    yield chunk
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise HomeAssistantError(f"Kokoro request failed: {err!r}") from err
 
     @staticmethod
     async def _async_read_capped(
@@ -422,7 +442,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
         async for chunk in response.content.iter_chunked(STREAM_CHUNK_BYTES):
             total += len(chunk)
             if total > MAX_AUDIO_BYTES:
-                raise RuntimeError(
+                raise HomeAssistantError(
                     f"Kokoro response exceeds {MAX_AUDIO_BYTES} bytes, aborting"
                 )
             if chunk:
@@ -534,10 +554,12 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
         reader = asyncio.create_task(read_text())
         sentence_count = 0
+        total_bytes = 0
         try:
             while (job := await jobs.get()) is not None:
                 task, chunks = job
                 while (audio := await chunks.get()) is not None:
+                    total_bytes += len(audio)
                     yield audio
                 await task  # surfaces a failed request
                 slots.release()
@@ -547,6 +569,9 @@ class KokoroTTSEntity(TextToSpeechEntity):
             reader.cancel()
             for task in fetches:
                 task.cancel()
+
+        if not total_bytes:
+            raise HomeAssistantError("Kokoro returned empty audio")
 
         _LOGGER.debug(
             "TTS stream complete: %d sentence(s), format: %s",
@@ -563,14 +588,5 @@ class KokoroTTSEntity(TextToSpeechEntity):
     ) -> AsyncGenerator[bytes]:
         """Synthesise one sentence and yield its audio as it arrives."""
         payload = self._build_payload(message, resolved, stream=True)
-
-        async with session.post(
-            self._speech_url,
-            json=payload,
-            headers=self._build_headers(),
-            timeout=timeout,
-        ) as response:
-            await self._raise_for_status(response)
-
-            async for chunk in self._async_read_capped(response):
-                yield chunk
+        async for chunk in self._async_post_audio(session, payload, timeout):
+            yield chunk

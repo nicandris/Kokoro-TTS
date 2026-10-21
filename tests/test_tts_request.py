@@ -112,17 +112,17 @@ async def test_get_tts_audio_401_starts_reauth(monkeypatch):
     assert entry.reauth_started_with is entity.hass
 
 
-async def test_get_tts_audio_server_error_raises_runtime_error(monkeypatch):
+async def test_get_tts_audio_server_error_raises_ha_error(monkeypatch):
     session = _FakeSession(_FakeResponse(status=500, text="boom"))
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HomeAssistantError):
         await _entity().async_get_tts_audio("hello", "en")
 
 
 async def test_get_tts_audio_empty_message_rejected():
     # Validated before any network call, so no session patching needed.
-    with pytest.raises(ValueError):
+    with pytest.raises(HomeAssistantError):
         await _entity().async_get_tts_audio("   ", "en")
 
 
@@ -179,3 +179,22 @@ async def test_pcm_is_served_as_playable_wav(monkeypatch):
     assert session.last_json["response_format"] == "wav"
     fmt, _audio = await _entity().async_get_tts_audio("hi", "en", {"format": "PCM"})
     assert fmt == "wav"
+
+
+async def test_transport_error_becomes_ha_error(monkeypatch):
+    import aiohttp
+
+    class _Broken:
+        def post(self, *args, **kwargs):
+            raise aiohttp.ClientError("refused")
+
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: _Broken())
+    with pytest.raises(HomeAssistantError, match="request failed"):
+        await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_empty_audio_is_an_ha_error(monkeypatch):
+    session = _FakeSession(_FakeResponse(body=b""))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(HomeAssistantError, match="empty audio"):
+        await _entity().async_get_tts_audio("hi", "en")

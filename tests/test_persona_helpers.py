@@ -118,3 +118,19 @@ def test_auth_headers_only_for_a_real_key():
     assert auth_headers("secret") == {"Authorization": "Bearer secret"}
     for placeholder in (None, "", "x", "not-needed"):
         assert auth_headers(placeholder) == {}
+
+
+def test_base_url_with_userinfo_is_rejected():
+    from custom_components.kokoro_tts.config_flow import _validate_base_url
+
+    assert _validate_base_url("http://user:pw@host:8880") == {"base_url": "invalid_base_url"}
+    assert _validate_base_url("http://user@host:8880") == {"base_url": "invalid_base_url"}
+    assert _validate_base_url("https://host:8880") == {}
+
+
+def test_api_key_field_is_a_password_field():
+    from custom_components.kokoro_tts import config_flow as cf
+
+    config = getattr(cf._PASSWORD_SELECTOR, "config", cf._PASSWORD_SELECTOR)
+    config = config.get("text", config)
+    assert config["type"] == "password"

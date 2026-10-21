@@ -111,8 +111,8 @@ The integration can be configured through Home Assistant's UI with automatic dis
 
 | Option | Description | Default | Range/Options |
 |--------|-------------|---------|---------------|
-| `base_url` | Kokoro FastAPI server URL | *Required* | Valid HTTP/HTTPS URL |
-| `api_key` | Authentication key | `"not-needed"` | Any string |
+| `base_url` | Kokoro FastAPI server URL | *Required* | Valid HTTP/HTTPS URL, no `user:password@` |
+| `api_key` | Authentication key (masked; sent in cleartext over `http://`, so prefer `https://` — a warning is logged) | `"not-needed"` | Any string |
 | `model` | TTS model to use | `"kokoro"` | Auto-discovered or custom |
 | `language` | Language filter for voices | `"All Languages"` | All Languages, American English, British English, Japanese, etc. |
 | `sex` | Sex filter for voices | `"All"` | All, Female, Male |

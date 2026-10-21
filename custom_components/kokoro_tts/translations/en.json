@@ -51,7 +51,7 @@
     },
     "error": {
       "base_url_required": "Base URL is required",
-      "invalid_base_url": "Enter a valid http(s) URL",
+      "invalid_base_url": "Enter a valid http(s) URL, without a username or password in it",
       "cannot_connect": "Cannot connect to the server - check the URL and that the server is running",
       "timeout": "Connection timed out - the server took too long to respond",
       "ssl_error": "SSL error - check your certificate settings",
