@@ -338,3 +338,41 @@ async def test_stream_with_no_audio_is_an_ha_error(monkeypatch):
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
     with pytest.raises(HomeAssistantError, match="empty audio"):
         await _drain(_entity(), ["One. ", "Two."])
+
+
+async def test_failed_look_ahead_after_consumer_stops_is_retrieved(monkeypatch):
+    # Regression: a look-ahead request that failed after the consumer stopped
+    # left "Task exception was never retrieved" in the log.
+    import asyncio
+    import gc
+
+    import aiohttp
+
+    class _Session(_RecordingSession):
+        def post(self, url, **kwargs):
+            if self.posts:
+                raise aiohttp.ClientError("second request fails")
+            return super().post(url, **kwargs)
+
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: _Session())
+    loop = asyncio.get_running_loop()
+    unretrieved = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unretrieved.append(context))
+    try:
+        response = await _entity().async_stream_tts_audio(
+            TTSAudioRequest(language="en", options={}, message_gen=_agen("One. ", "Two. ", "Three."))
+        )
+        data_gen = response.data_gen
+        await anext(data_gen)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        await data_gen.aclose()
+        del data_gen, response
+        for _ in range(5):
+            await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous)
+    assert unretrieved == []

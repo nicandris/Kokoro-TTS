@@ -98,6 +98,12 @@ def _dot_ends_sentence(segment: str) -> bool:
     return not (len(last) == 1 and last.isalpha())
 
 
+def _retrieve_exception(task: asyncio.Task) -> None:
+    """Mark a background task's exception as retrieved."""
+    if not task.cancelled():
+        task.exception()
+
+
 def split_sentences(buffer: str) -> tuple[list[str], str]:
     """Split a text buffer into complete sentences plus a trailing remainder.
 
@@ -562,9 +568,11 @@ class KokoroTTSEntity(TextToSpeechEntity):
                 sentence_count += 1
             await reader  # surfaces a failed text stream
         finally:
-            reader.cancel()
-            for task in fetches:
+            for task in (reader, *fetches):
                 task.cancel()
+                # Retrieve a late failure explicitly; cancel() on a finished
+                # task only silences it as a CPython implementation detail.
+                task.add_done_callback(_retrieve_exception)
 
         if not total_bytes:
             raise HomeAssistantError("Kokoro returned empty audio")
