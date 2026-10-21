@@ -8,7 +8,7 @@
   <p align="center">
     <img src="https://img.shields.io/github/languages/top/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
     <img src="https://img.shields.io/github/languages/code-size/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8257e6?style=for-the-badge&logoColor=white&label=License&color=FFFFFF"></a>
+    <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-8257e6?style=for-the-badge&logoColor=white&label=License&color=FFFFFF"></a>
   </p>
 </div>
 
