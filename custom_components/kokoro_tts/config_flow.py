@@ -534,8 +534,8 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict | None = None):
         """Change the server URL or API key of an existing entry.
 
-        The entry keeps its unique ID (and its entities theirs, which are bound
-        to the entry ID), so moving the server does not create a new entry.
+        The entry's unique ID follows the new URL (so adding that server
+        again is refused); its entities are bound to the entry ID and stay.
         """
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
@@ -558,6 +558,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     title = _entry_title(base)
                 return self.async_update_reload_and_abort(
                     entry,
+                    unique_id=new_id,
                     title=title,
                     data_updates={CONF_BASE_URL: base, CONF_API_KEY: api_key},
                 )
@@ -588,17 +589,9 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if conn_errors:
                 errors.update(conn_errors)
             else:
-                # Update the existing entry
-                entry_id = self.context.get("entry_id")
-                if entry_id:
-                    entry = self.hass.config_entries.async_get_entry(entry_id)
-                    if entry:
-                        self.hass.config_entries.async_update_entry(
-                            entry,
-                            data={**entry.data, CONF_API_KEY: api_key},
-                        )
-                        return self.async_abort(reason="reauth_successful")
-                return self.async_abort(reason="reauth_failed")
+                return self.async_update_reload_and_abort(
+                    self._get_reauth_entry(), data_updates={CONF_API_KEY: api_key}
+                )
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -627,14 +620,8 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # Options Flow
 # ---------------------------------------------------------------------------
 
-class KokoroOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow for Kokoro TTS.
-
-    Deliberately NOT OptionsFlowWithReload: __init__.py registers an update
-    listener that reloads the entry on any change, which covers both the
-    options flow and a reauth that swaps the API key. Using both would reload
-    the entry twice for every options save.
-    """
+class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
+    """Handle options flow for Kokoro TTS; saving reloads the entry once."""
 
     def __init__(self) -> None:
         """Initialize options flow.

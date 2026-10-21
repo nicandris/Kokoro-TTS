@@ -55,11 +55,15 @@ def _stub_homeassistant() -> None:
     class OptionsFlow:
         pass
 
+    class OptionsFlowWithReload(OptionsFlow):
+        automatic_reload = True
+
     class ConfigEntry:
         pass
 
     config_entries.ConfigFlow = ConfigFlow
     config_entries.OptionsFlow = OptionsFlow
+    config_entries.OptionsFlowWithReload = OptionsFlowWithReload
     config_entries.ConfigEntry = ConfigEntry
     ha.config_entries = config_entries
 

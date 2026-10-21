@@ -393,6 +393,8 @@ async def test_reconfigure_updates_url_key_and_generated_title(_connection):
     )
     assert result["reason"] == "reconfigure_successful"
     assert flow.updated == {
+        # Regression: the entry kept the old URL's unique_id.
+        "unique_id": cf._calc_unique_id("http://newhost:8880"),
         "title": "Kokoro TTS (newhost)",
         "data_updates": {CONF_BASE_URL: "http://newhost:8880", CONF_API_KEY: "secret"},
     }
@@ -419,3 +421,13 @@ async def test_reconfigure_shows_connection_errors_and_saves_nothing(_connection
     assert result["type"] == "form" and result["step_id"] == "reconfigure"
     assert result["errors"] == {CONF_BASE_URL: "cannot_connect"}
     assert flow.updated is None
+
+
+async def test_reauth_saves_the_new_key_through_update_reload_and_abort(_connection):
+    entry = _reconfig_entry()
+    flow = _ReconfigureFlow(entry)
+    flow._get_reauth_entry = lambda: entry
+    await flow.async_step_reauth(dict(entry.data))
+    result = await flow.async_step_reauth_confirm({CONF_API_KEY: "new-key"})
+    assert result["reason"] == "reconfigure_successful"  # recorder's canned reply
+    assert flow.updated == {"data_updates": {CONF_API_KEY: "new-key"}}
