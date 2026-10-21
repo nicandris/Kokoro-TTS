@@ -117,7 +117,7 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | `sex` | Sex filter for voices | `"All"` | All, Female, Male |
 | `persona` | Voice persona/character | *Required* | Auto-discovered from server |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 - 4.0 |
-| `format` | Audio format | `"mp3"` | mp3, wav, opus, flac, pcm |
+| `format` | Audio format | `"mp3"` | mp3, wav, opus, flac |
 | `volume_multiplier` | Default output volume multiplier | `1.0` | 0.1 – 5.0 |
 
 ### 👨👩 Personas
@@ -209,7 +209,7 @@ The same syntax works for the per-call `persona` option (see [Per-call option ov
 4. **Select Persona** — pick from the list filtered by the previous step:
    - **Voice/Persona**: Select from the filtered list of available personas
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
-   - **Format**: Audio format (mp3, wav, opus, flac, pcm)
+   - **Format**: Audio format (mp3, wav, opus, flac). A `pcm` setting from an older version is treated as `wav`.
    - **Default Volume**: Output volume multiplier (1.0 = unchanged; raise for louder TTS).
 
 > **Changing options?** Any changes made via `Settings` → `Devices & Services` → `Configure` take effect immediately — no Home Assistant restart is required.
@@ -249,7 +249,7 @@ whole reply. On a multi-sentence answer this hides most of the generation time.
 Streaming is automatic — there is nothing to configure. Two things worth knowing:
 
 - Each sentence is synthesised as its own request and the audio is concatenated, so
-  the format must be concatenable. `mp3`, `opus` and `pcm` are; `wav` and `flac`
+  the format must be concatenable. `mp3` and `opus` are; `wav` and `flac`
   carry a per-file header and are not. If the configured format is not stream-safe,
   `mp3` is used **for streaming only** — regular `tts.speak` calls keep the format
   you configured.
@@ -304,7 +304,7 @@ target:
 |--------|-------------|---------|-------|
 | `persona` | Voice persona code | Config default | Any discovered persona |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 – 4.0 |
-| `format` | Audio format | `mp3` | mp3, wav, opus, flac, pcm |
+| `format` | Audio format | `mp3` | mp3, wav, opus, flac |
 | `volume_multiplier` | Volume multiplier | `1.0` | Any positive float |
 
 ---

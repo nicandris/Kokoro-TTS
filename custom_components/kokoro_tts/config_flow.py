@@ -38,7 +38,7 @@ _CODE_TO_LANGUAGE = {code: lang for lang, code in LANGUAGE_CODE_MAP.items()}
 
 _LOGGER = logging.getLogger(__name__)
 
-_FORMAT_OPTIONS = ["mp3", "wav", "opus", "flac", "pcm"]
+_FORMAT_OPTIONS = ["mp3", "wav", "opus", "flac"]
 
 # Transient, wizard-only field - never stored in the config entry. Lets the
 # persona step send the user back to the filter step.

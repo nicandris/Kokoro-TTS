@@ -89,6 +89,12 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
     return sentences, buffer[last_end:]
 
 
+def _playable_format(fmt: str) -> str:
+    """Lower-case the format and replace headerless pcm with wav."""
+    fmt = fmt.lower()
+    return "wav" if fmt == "pcm" else fmt
+
+
 async def async_setup_entry(
     hass: HomeAssistant, config_entry: ConfigEntry, async_add_entities: Any
 ) -> None:
@@ -269,7 +275,9 @@ class KokoroTTSEntity(TextToSpeechEntity):
             "language": language,
             "persona": opts.get("persona", opts.get("voice", self._persona)),
             "speed": float(opts.get("speed", self._speed)),
-            "fmt": (opts.get("format", self._fmt) or self._fmt).lower(),
+            # Raw pcm has no header, so neither players nor HA's ffmpeg can
+            # tell its sample format; Kokoro's wav is the same audio, playable.
+            "fmt": _playable_format(opts.get("format", self._fmt) or self._fmt),
             # Falls back to the entity's configured default volume, not a
             # hardcoded 1.0, so the options-flow slider actually takes effect.
             "volume_multiplier": float(

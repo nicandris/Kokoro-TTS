@@ -166,3 +166,14 @@ async def test_oversized_response_is_refused(monkeypatch):
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
     with pytest.raises(Exception, match="exceeds"):
         await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_pcm_is_served_as_playable_wav(monkeypatch):
+    # Regression: headerless .pcm could not be played or converted by ffmpeg.
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    fmt, _audio = await _entity(fmt="pcm").async_get_tts_audio("hi", "en")
+    assert fmt == "wav"
+    assert session.last_json["response_format"] == "wav"
+    fmt, _audio = await _entity().async_get_tts_audio("hi", "en", {"format": "PCM"})
+    assert fmt == "wav"
