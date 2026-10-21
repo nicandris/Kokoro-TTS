@@ -1,13 +1,13 @@
 <div id="top">
   <p align="center">
-    <img src="https://raw.githubusercontent.com/beecho01/Kokoro-TTS/refs/heads/main/docs/images/Kokoro_Header.png" width="600" alt="Kokoro TTS Header">
+    <img src="https://raw.githubusercontent.com/nicandris/Kokoro-TTS/refs/heads/main/docs/images/Kokoro_Header.png" width="600" alt="Kokoro TTS Header">
   </p>
 </div>
 
 <div>
   <p align="center">
-    <img src="https://img.shields.io/github/languages/top/beecho01/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
-    <img src="https://img.shields.io/github/languages/code-size/beecho01/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
+    <img src="https://img.shields.io/github/languages/top/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
+    <img src="https://img.shields.io/github/languages/code-size/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
     <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-8257e6?style=for-the-badge&logoColor=white&label=License&color=FFFFFF"></a>
   </p>
 </div>
@@ -80,14 +80,14 @@ See the [changelog](CHANGELOG.md) for the full list of changes — upstream is w
 ### HACS (recommended)
 
 1. Go to `HACS` → `Integrations` → `Custom repositories`.  
-2. Add this repository: `https://github.com/beecho01/Kokoro-TTS` with category `Integration`.
+2. Add this repository: `https://github.com/nicandris/Kokoro-TTS` with category `Integration`.
 3. Either search for `Kokoro-TTS` in HACS or tap the below button:
    
-   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=beecho01&repository=Kokoro-TTS)
+   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nicandris&repository=Kokoro-TTS)
 4. Tap `Download` and then `Install`.
 5. Then tap next setup quick-link below to complete the setup configuration:
    
-    [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=Kokoro-TTS)
+    [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=kokoro_tts)
 6. [Configure](#️-configuration) the Kokoro TTS integration as desired.
 
 ### Manual
