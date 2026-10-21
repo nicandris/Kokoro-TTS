@@ -56,6 +56,7 @@ See the [changelog](CHANGELOG.md) for the full list of changes — upstream is w
   - [Connection errors during setup](#connection-errors-during-setup)
   - [Voice/persona not changing after options update](#voicepersona-not-changing-after-options-update)
   - [Per-call option overrides](#per-call-option-overrides)
+- [📄 Licence](#-licence)
 - [🙏 Credits](#-credits)
 
 ---
@@ -306,6 +307,13 @@ target:
 | `speed` | Speech speed multiplier | `1.0` | 0.25 – 4.0 |
 | `format` | Audio format | `mp3` | mp3, wav, opus, flac |
 | `volume_multiplier` | Volume multiplier | `1.0` | Any positive float |
+
+---
+
+## 📄 Licence
+
+Licensed under [CC BY-NC-SA 4.0](LICENSE), matching the upstream project
+[beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) this fork is based on.
 
 ---
 
