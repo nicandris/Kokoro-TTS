@@ -52,10 +52,13 @@ jobs:
       - name: Install Home Assistant and test dependencies
         # mutagen and ha-ffmpeg are requirements of HA's own tts/ffmpeg
         # components, which the base homeassistant package does not pull in.
+        # extra goes through env: inlined, bash parsed "pycares<5" as a redirect.
+        env:
+          EXTRA: ${{ matrix.extra }}
         run: |
           pip install -r requirements_test.txt
           if [ "${{ matrix.homeassistant }}" = "latest" ]; then ha=homeassistant; else ha="homeassistant==${{ matrix.homeassistant }}"; fi
-          pip install "$ha" mutagen ha-ffmpeg ${{ matrix.extra }}
+          pip install "$ha" mutagen ha-ffmpeg $EXTRA
           python -c "from homeassistant.const import __version__; print('Home Assistant', __version__)"
       - name: Run tests
         run: python -m pytest tests/ -v
