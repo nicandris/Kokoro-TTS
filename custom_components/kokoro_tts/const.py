@@ -13,7 +13,6 @@ CONF_LANGUAGE = "language"
 CONF_SEX = "sex"
 CONF_SPEED = "speed"
 CONF_FORMAT = "format"
-CONF_SAMPLE_RATE = "sample_rate"
 CONF_VOLUME_MULTIPLIER = "volume_multiplier"
 
 # Default values
@@ -26,13 +25,10 @@ DEFAULT_SPEED = 1.0
 DEFAULT_FORMAT = "mp3"
 DEFAULT_VOLUME_MULTIPLIER = 1.0
 
-# Kokoro FastAPI always outputs 24 kHz; shown read-only in the UI and never sent.
-FIXED_SAMPLE_RATE = 24000
-
 # Streaming synthesises one sentence per request and concatenates the audio,
 # so the format must survive concatenation. Container formats that carry a
 # per-file header (wav, flac) do not.
-STREAM_SAFE_FORMATS: tuple[str, ...] = ("mp3", "opus", "pcm")
+STREAM_SAFE_FORMATS: tuple[str, ...] = ("mp3", "opus")
 DEFAULT_STREAM_FORMAT = "mp3"
 
 # Voice mapping: technical_name -> (language, gender, display_name)
@@ -193,3 +189,16 @@ DEFAULTS: dict[str, Any] = {
     CONF_FORMAT: DEFAULT_FORMAT,
     CONF_VOLUME_MULTIPLIER: DEFAULT_VOLUME_MULTIPLIER,
 }
+
+
+def playable_format(fmt: str) -> str:
+    """Lower-case the format and replace headerless pcm with wav."""
+    fmt = fmt.lower()
+    return "wav" if fmt == "pcm" else fmt
+
+
+def auth_headers(api_key: str | None) -> dict[str, str]:
+    """Bearer header for a real API key; none for the "no key" placeholders."""
+    if api_key and api_key not in ("x", DEFAULT_API_KEY):
+        return {"Authorization": f"Bearer {api_key}"}
+    return {}

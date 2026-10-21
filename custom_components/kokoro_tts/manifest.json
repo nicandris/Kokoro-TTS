@@ -2,13 +2,13 @@
     "domain": "kokoro_tts",
     "name": "Kokoro TTS",
     "codeowners": [
-        "@beecho01"
+        "@nicandris"
     ],
     "config_flow": true,
-    "documentation": "https://github.com/beecho01/Kokoro-TTS",
+    "documentation": "https://github.com/nicandris/Kokoro-TTS",
     "integration_type": "service",
     "iot_class": "local_polling",
-    "issue_tracker": "https://github.com/beecho01/Kokoro-TTS/issues",
+    "issue_tracker": "https://github.com/nicandris/Kokoro-TTS/issues",
     "requirements": [],
-    "version": "2026.10.13"
+    "version": "2026.10.21"
 }

@@ -55,11 +55,15 @@ def _stub_homeassistant() -> None:
     class OptionsFlow:
         pass
 
+    class OptionsFlowWithReload(OptionsFlow):
+        automatic_reload = True
+
     class ConfigEntry:
         pass
 
     config_entries.ConfigFlow = ConfigFlow
     config_entries.OptionsFlow = OptionsFlow
+    config_entries.OptionsFlowWithReload = OptionsFlowWithReload
     config_entries.ConfigEntry = ConfigEntry
     ha.config_entries = config_entries
 
@@ -80,9 +84,13 @@ def _stub_homeassistant() -> None:
 
     exceptions = _mod("homeassistant.exceptions")
 
-    class ConfigEntryAuthFailed(Exception):
+    class HomeAssistantError(Exception):
         pass
 
+    class ConfigEntryAuthFailed(HomeAssistantError):
+        pass
+
+    exceptions.HomeAssistantError = HomeAssistantError
     exceptions.ConfigEntryAuthFailed = ConfigEntryAuthFailed
 
     helpers = _mod("homeassistant.helpers")
@@ -103,13 +111,29 @@ def _stub_homeassistant() -> None:
     aiohttp_client.async_get_clientsession = async_get_clientsession
     helpers.aiohttp_client = aiohttp_client
 
+    device_registry = _mod("homeassistant.helpers.device_registry")
+
+    class DeviceEntryType:
+        SERVICE = "service"
+
+    device_registry.DeviceEntryType = DeviceEntryType
+    device_registry.DeviceInfo = dict
+    helpers.device_registry = device_registry
+
     components = _mod("homeassistant.components")
     tts_pkg = _mod("homeassistant.components.tts")
     tts_entity = _mod("homeassistant.components.tts.entity")
 
     class TextToSpeechEntity:
+        _attr_name = None
+
         def __init__(self, *args, **kwargs):
             pass
+
+        @property
+        def name(self):
+            # Mirrors Entity.name without has_entity_name.
+            return self._attr_name
 
     # Field names, order and required-ness mirror homeassistant.components.tts
     # .entity exactly. Keep them in sync: a looser stub silently accepts calls

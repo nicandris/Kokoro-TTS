@@ -6,9 +6,13 @@ on:
   schedule:
     - cron: "0 0 * * *"
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: "ubuntu-latest"
     steps:
       - uses: "actions/checkout@v7"
-      - uses: home-assistant/actions/hassfest@master
+      # Pinned to a commit: the action has no release tags.
+      - uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6 # master 2026-10-21

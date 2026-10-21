@@ -8,7 +8,16 @@ from custom_components.kokoro_tts.tts import KokoroTTSEntity
 
 # Resolves to the real package or the conftest stub, whichever is installed;
 # tts.py raises the same class, so isinstance/pytest.raises matches either way.
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import HomeAssistantError
+
+
+class _FakeContent:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    async def iter_chunked(self, size: int):
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
 
 
 class _FakeResponse:
@@ -16,6 +25,7 @@ class _FakeResponse:
                  json_data=None, text="error-body"):
         self.status = status
         self._body = body
+        self.content = _FakeContent(body)
         self.headers = {"content-type": content_type}
         self._json = json_data
         self._text = text
@@ -53,7 +63,6 @@ class _FakeSession:
 def _entity(**overrides):
     kwargs = dict(
         unique_id="entry-abc",
-        name="kokoro",
         base_url="http://host:8880",
         api_key="secret",
         model="kokoro",
@@ -79,25 +88,41 @@ async def test_get_tts_audio_happy_path(monkeypatch):
     assert audio == b"AUDIO"
 
 
-async def test_get_tts_audio_401_raises_auth_failed(monkeypatch):
+class _FakeConfigEntry:
+    entry_id = "entry-abc"
+    title = "Kokoro TTS (host)"
+
+    def __init__(self):
+        self.reauth_started_with = None
+
+    def async_start_reauth(self, hass):
+        self.reauth_started_with = hass
+
+
+async def test_get_tts_audio_401_starts_reauth(monkeypatch):
+    # Regression: ConfigEntryAuthFailed raised from a TTS call never started
+    # reauth - HA only acts on it during entry setup.
     session = _FakeSession(_FakeResponse(status=401, text="nope"))
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    entry = _FakeConfigEntry()
+    entity = _entity(config_entry=entry)
 
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _entity().async_get_tts_audio("hello", "en")
+    with pytest.raises(HomeAssistantError, match="Authentication failed"):
+        await entity.async_get_tts_audio("hello", "en")
+    assert entry.reauth_started_with is entity.hass
 
 
-async def test_get_tts_audio_server_error_raises_runtime_error(monkeypatch):
+async def test_get_tts_audio_server_error_raises_ha_error(monkeypatch):
     session = _FakeSession(_FakeResponse(status=500, text="boom"))
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HomeAssistantError):
         await _entity().async_get_tts_audio("hello", "en")
 
 
 async def test_get_tts_audio_empty_message_rejected():
     # Validated before any network call, so no session patching needed.
-    with pytest.raises(ValueError):
+    with pytest.raises(HomeAssistantError):
         await _entity().async_get_tts_audio("   ", "en")
 
 
@@ -115,3 +140,61 @@ async def test_per_call_volume_overrides_default(monkeypatch):
         "hi", "en", {"volume_multiplier": 3.0}
     )
     assert session.last_json["volume_multiplier"] == 3.0
+
+
+async def test_request_sends_the_voices_own_lang_code(monkeypatch):
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity(language="American English").async_get_tts_audio(
+        "hi", "en", {"voice": "jf_alpha"}
+    )
+    assert session.last_json["lang_code"] == "j"
+
+
+async def test_json_response_is_not_followed(monkeypatch):
+    # Regression: a JSON body with a download_url used to be fetched (SSRF).
+    session = _FakeSession(
+        _FakeResponse(body=b'{"download_url": "http://169.254.169.254/"}',
+                      content_type="application/json")
+    )
+    session.get = lambda *a, **k: pytest.fail("followed a server-supplied URL")
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_oversized_response_is_refused(monkeypatch):
+    monkeypatch.setattr(tts, "MAX_AUDIO_BYTES", 10)
+    session = _FakeSession(_FakeResponse(body=b"x" * 11))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(Exception, match="exceeds"):
+        await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_pcm_is_served_as_playable_wav(monkeypatch):
+    # Regression: headerless .pcm could not be played or converted by ffmpeg.
+    session = _FakeSession(_FakeResponse(status=200))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    fmt, _audio = await _entity(fmt="pcm").async_get_tts_audio("hi", "en")
+    assert fmt == "wav"
+    assert session.last_json["response_format"] == "wav"
+    fmt, _audio = await _entity().async_get_tts_audio("hi", "en", {"format": "PCM"})
+    assert fmt == "wav"
+
+
+async def test_transport_error_becomes_ha_error(monkeypatch):
+    import aiohttp
+
+    class _Broken:
+        def post(self, *args, **kwargs):
+            raise aiohttp.ClientError("refused")
+
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: _Broken())
+    with pytest.raises(HomeAssistantError, match="request failed"):
+        await _entity().async_get_tts_audio("hi", "en")
+
+
+async def test_empty_audio_is_an_ha_error(monkeypatch):
+    session = _FakeSession(_FakeResponse(body=b""))
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(HomeAssistantError, match="empty audio"):
+        await _entity().async_get_tts_audio("hi", "en")

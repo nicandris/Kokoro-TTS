@@ -14,7 +14,7 @@ from custom_components.kokoro_tts.const import STREAM_SAFE_FORMATS
 from custom_components.kokoro_tts.tts import KokoroTTSEntity, split_sentences
 
 from homeassistant.components.tts.entity import TTSAudioRequest
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import HomeAssistantError
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,6 @@ class _RecordingSession:
 def _entity(**overrides):
     kwargs = dict(
         unique_id="entry-abc",
-        name="kokoro",
         base_url="http://host:8880",
         api_key="secret",
         model="kokoro",
@@ -165,7 +164,7 @@ async def test_stream_falls_back_to_safe_format_for_wav(monkeypatch):
     session = _RecordingSession()
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    response, _audio = await _drain(_entity(fmt="wav"), ["Hi. "])
+    response, _audio = await _drain(_entity(fmt="wav"), ["Hi. ", "Bye. "])
 
     assert response.extension in STREAM_SAFE_FORMATS
     assert response.extension == "mp3"
@@ -185,7 +184,7 @@ async def test_stream_requests_set_stream_flag(monkeypatch):
     session = _RecordingSession()
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    await _drain(_entity(), ["Hi. "])
+    await _drain(_entity(), ["Hi. ", "Bye. "])
 
     assert session.posts[0]["json"]["stream"] is True
 
@@ -215,16 +214,27 @@ async def test_stream_401_raises_auth_failed(monkeypatch):
     # bad API key never triggered Home Assistant's reauth flow.
     session = _RecordingSession(status=401)
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    started = []
+    entry = type(
+        "Entry",
+        (),
+        {
+            "entry_id": "entry-abc",
+            "title": "Kokoro TTS (host)",
+            "async_start_reauth": lambda self, hass: started.append(hass),
+        },
+    )()
 
-    with pytest.raises(ConfigEntryAuthFailed):
-        await _drain(_entity(), ["Hi. "])
+    with pytest.raises(HomeAssistantError):
+        await _drain(_entity(config_entry=entry), ["Hi. "])
+    assert len(started) == 1
 
 
-async def test_stream_server_error_raises_runtime_error(monkeypatch):
+async def test_stream_server_error_raises_ha_error(monkeypatch):
     session = _RecordingSession(status=500)
     monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(HomeAssistantError):
         await _drain(_entity(), ["Hi. "])
 
 
@@ -249,3 +259,120 @@ async def test_stream_uses_shared_session(monkeypatch):
     # One shared session for the whole stream, reused across both sentences.
     assert len(calls) == 1
     assert len(session.posts) == 2
+
+
+# ---------------------------------------------------------------------------
+# Full message vs real stream (HA sends both through async_stream_tts_audio)
+# ---------------------------------------------------------------------------
+
+async def test_full_message_uses_single_request_in_configured_format(monkeypatch):
+    # Regression: HA routes a plain tts.speak here as a one-chunk stream, which
+    # forced wav/flac to mp3 and split the message into per-sentence requests.
+    session = _RecordingSession()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    response, audio = await _drain(_entity(fmt="wav"), ["One. Two. Three."])
+
+    assert response.extension == "wav"
+    assert session.messages == ["One. Two. Three."]
+    assert session.posts[0]["json"]["stream"] is False
+    assert audio == b"AUDIO"
+
+
+async def test_real_stream_still_goes_per_sentence(monkeypatch):
+    session = _RecordingSession()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    response, _audio = await _drain(_entity(fmt="flac"), ["One. Tw", "o."])
+
+    assert response.extension == "mp3"
+    assert session.messages == ["One.", "Two."]
+
+
+def test_split_sentences_keeps_abbreviations_and_list_numbers():
+    sentences, remainder = split_sentences("Ask Dr. Smith today. Steps: 1. Mix it. 2. Bake it. ")
+    assert sentences == ["Ask Dr. Smith today.", "Steps: 1. Mix it.", "2. Bake it."]
+    assert remainder == ""
+
+
+def test_split_sentences_splits_cjk_and_newline_lists():
+    sentences, remainder = split_sentences("今日は晴れです。明日は雨！- milk\n- eggs\nbread")
+    assert sentences == ["今日は晴れです。", "明日は雨！", "- milk", "- eggs"]
+    assert remainder == "bread"
+
+
+async def test_stream_synthesises_next_sentence_while_current_plays(monkeypatch):
+    # Regression: sentences were synthesised strictly in sequence. Sentence 1's
+    # audio only arrives once sentence 2's request has been sent.
+    import asyncio
+
+    second_posted = asyncio.Event()
+
+    class _GatedContent:
+        async def iter_chunked(self, size):
+            await second_posted.wait()
+            yield b"ONE"
+
+    class _Session(_RecordingSession):
+        def post(self, url, **kwargs):
+            response = super().post(url, **kwargs)
+            if len(self.posts) == 1:
+                response.content = _GatedContent()
+            else:
+                second_posted.set()
+            return response
+
+    session = _Session()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    _response, audio = await asyncio.wait_for(
+        _drain(_entity(), ["One. ", "Two. ", "Three."]), timeout=2
+    )
+    assert audio == b"ONE" + b"AUDIO" * 2
+    assert session.messages == ["One.", "Two.", "Three."]
+
+
+async def test_stream_with_no_audio_is_an_ha_error(monkeypatch):
+    # Regression: a stream of empty responses "succeeded" with no audio.
+    session = _RecordingSession(body=b"")
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+    with pytest.raises(HomeAssistantError, match="empty audio"):
+        await _drain(_entity(), ["One. ", "Two."])
+
+
+async def test_failed_look_ahead_after_consumer_stops_is_retrieved(monkeypatch):
+    # Regression: a look-ahead request that failed after the consumer stopped
+    # left "Task exception was never retrieved" in the log.
+    import asyncio
+    import gc
+
+    import aiohttp
+
+    class _Session(_RecordingSession):
+        def post(self, url, **kwargs):
+            if self.posts:
+                raise aiohttp.ClientError("second request fails")
+            return super().post(url, **kwargs)
+
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: _Session())
+    loop = asyncio.get_running_loop()
+    unretrieved = []
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unretrieved.append(context))
+    try:
+        response = await _entity().async_stream_tts_audio(
+            TTSAudioRequest(language="en", options={}, message_gen=_agen("One. ", "Two. ", "Three."))
+        )
+        data_gen = response.data_gen
+        await anext(data_gen)
+        for _ in range(5):
+            await asyncio.sleep(0)
+        await data_gen.aclose()
+        del data_gen, response
+        for _ in range(5):
+            await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous)
+    assert unretrieved == []

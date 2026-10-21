@@ -1,13 +1,13 @@
 <div id="top">
   <p align="center">
-    <img src="https://raw.githubusercontent.com/beecho01/Kokoro-TTS/refs/heads/main/docs/images/Kokoro_Header.png" width="600" alt="Kokoro TTS Header">
+    <img src="https://raw.githubusercontent.com/nicandris/Kokoro-TTS/refs/heads/main/docs/images/Kokoro_Header.png" width="600" alt="Kokoro TTS Header">
   </p>
 </div>
 
 <div>
   <p align="center">
-    <img src="https://img.shields.io/github/languages/top/beecho01/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
-    <img src="https://img.shields.io/github/languages/code-size/beecho01/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
+    <img src="https://img.shields.io/github/languages/top/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
+    <img src="https://img.shields.io/github/languages/code-size/nicandris/Kokoro-TTS?style=for-the-badge&color=FFFFFF">
     <a href="http://creativecommons.org/licenses/by-nc-sa/4.0/"><img src="https://img.shields.io/badge/license-CC--BY--NC--SA--4.0-8257e6?style=for-the-badge&logoColor=white&label=License&color=FFFFFF"></a>
   </p>
 </div>
@@ -21,11 +21,11 @@
 
 - Options changes apply immediately — the TTS entity reloads (no restart), and a reauth that swaps the API key reloads it too; HTTP 401 triggers re-authentication on both the regular and streaming paths; Home Assistant's shared HTTP session is reused rather than opened per request.
 - Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one (`jf_alpha` / `hf_alpha` both show as "Alpha"); blended voices survive an accent-filter change.
-- Configurable **default volume** in the setup menu, applied to streaming as well; sample rate is shown read-only (Kokoro output is fixed at 24 kHz).
+- Configurable **default volume** in the setup menu, applied to streaming as well.
 - The entity advertises every language Kokoro speaks, and defaults to the configured voice's own language.
-- A unit-test suite that runs without Home Assistant installed, plus CI on Python 3.13 / 3.14.
+- A unit-test suite that runs without Home Assistant installed, plus CI against the minimum supported Home Assistant (2025.8) and the latest release.
 
-See the [changelog](CHANGELOG.md) for the full list of changes, and [DIVERSION.md](DIVERSION.md) for how each one maps back to upstream — upstream is welcome to take any of it.
+See the [changelog](CHANGELOG.md) for the full list of changes — upstream is welcome to take any of it. (The old per-change upstream map, `DIVERSION.md`, was retired in 2026.10.21; it is in git history.)
 
 <p align="center">
   <em>
@@ -56,6 +56,7 @@ See the [changelog](CHANGELOG.md) for the full list of changes, and [DIVERSION.m
   - [Connection errors during setup](#connection-errors-during-setup)
   - [Voice/persona not changing after options update](#voicepersona-not-changing-after-options-update)
   - [Per-call option overrides](#per-call-option-overrides)
+- [📄 Licence](#-licence)
 - [🙏 Credits](#-credits)
 
 ---
@@ -80,14 +81,14 @@ See the [changelog](CHANGELOG.md) for the full list of changes, and [DIVERSION.m
 ### HACS (recommended)
 
 1. Go to `HACS` → `Integrations` → `Custom repositories`.  
-2. Add this repository: `https://github.com/beecho01/Kokoro-TTS` with category `Integration`.
+2. Add this repository: `https://github.com/nicandris/Kokoro-TTS` with category `Integration`.
 3. Either search for `Kokoro-TTS` in HACS or tap the below button:
    
-   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=beecho01&repository=Kokoro-TTS)
+   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nicandris&repository=Kokoro-TTS)
 4. Tap `Download` and then `Install`.
 5. Then tap next setup quick-link below to complete the setup configuration:
    
-    [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=Kokoro-TTS)
+    [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=kokoro_tts)
 6. [Configure](#️-configuration) the Kokoro TTS integration as desired.
 
 ### Manual
@@ -110,16 +111,15 @@ The integration can be configured through Home Assistant's UI with automatic dis
 
 | Option | Description | Default | Range/Options |
 |--------|-------------|---------|---------------|
-| `base_url` | Kokoro FastAPI server URL | *Required* | Valid HTTP/HTTPS URL |
-| `api_key` | Authentication key | `"not-needed"` | Any string |
+| `base_url` | Kokoro FastAPI server URL | *Required* | Valid HTTP/HTTPS URL, no `user:password@` |
+| `api_key` | Authentication key (masked; sent in cleartext over `http://`, so prefer `https://` — a warning is logged) | `"not-needed"` | Any string |
 | `model` | TTS model to use | `"kokoro"` | Auto-discovered or custom |
 | `language` | Language filter for voices | `"All Languages"` | All Languages, American English, British English, Japanese, etc. |
 | `sex` | Sex filter for voices | `"All"` | All, Female, Male |
 | `persona` | Voice persona/character | *Required* | Auto-discovered from server |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 - 4.0 |
-| `format` | Audio format | `"mp3"` | mp3, wav, opus, flac, pcm |
+| `format` | Audio format | `"mp3"` | mp3, wav, opus, flac |
 | `volume_multiplier` | Default output volume multiplier | `1.0` | 0.1 – 5.0 |
-| `sample_rate` | Output sample rate — **read-only**, fixed by the server | `24000` | Fixed at 24000 Hz |
 
 ### 👨👩 Personas
 
@@ -210,9 +210,8 @@ The same syntax works for the per-call `persona` option (see [Per-call option ov
 4. **Select Persona** — pick from the list filtered by the previous step:
    - **Voice/Persona**: Select from the filtered list of available personas
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
-   - **Format**: Audio format (mp3, wav, opus, flac, pcm)
+   - **Format**: Audio format (mp3, wav, opus, flac). A `pcm` setting from an older version is treated as `wav`.
    - **Default Volume**: Output volume multiplier (1.0 = unchanged; raise for louder TTS).
-   - **Sample Rate**: Read-only. Kokoro FastAPI always outputs 24000 Hz, so it can't be changed.
 
 > **Changing options?** Any changes made via `Settings` → `Devices & Services` → `Configure` take effect immediately — no Home Assistant restart is required.
 
@@ -228,6 +227,10 @@ The same syntax works for the per-call `persona` option (see [Per-call option ov
 
 > [!NOTE]
 > Work in Progress
+
+Each server's entity is named after its entry, e.g. `tts.kokoro_tts_kitchen` for
+"Kokoro TTS (kitchen)"; an entity created before 2026.10.21 keeps its old id
+(`tts.kokoro`, `tts.kokoro_2`). The examples below use `tts.kokoro` — substitute yours.
 
 **Triggered action**
 
@@ -251,12 +254,14 @@ whole reply. On a multi-sentence answer this hides most of the generation time.
 Streaming is automatic — there is nothing to configure. Two things worth knowing:
 
 - Each sentence is synthesised as its own request and the audio is concatenated, so
-  the format must be concatenable. `mp3`, `opus` and `pcm` are; `wav` and `flac`
+  the format must be concatenable. `mp3` and `opus` are; `wav` and `flac`
   carry a per-file header and are not. If the configured format is not stream-safe,
-  `mp3` is used **for streaming only** — regular `tts.speak` calls keep the format
-  you configured.
-- Non-streaming callers (like the `tts.speak` example above) are unaffected and
-  continue to use the single-request path.
+  `mp3` is used **for streaming only**.
+- Only a reply that Home Assistant actually streams (a long conversation-agent
+  answer) takes the per-sentence path. A full message — `tts.speak` like the example
+  above, or a short Assist reply — is synthesised in a single request in the format
+  you configured. (Home Assistant may still transcode that audio, e.g. to `mp3` for
+  a media player, unless the caller asks for a specific format.)
 
 ---
 
@@ -306,8 +311,15 @@ target:
 |--------|-------------|---------|-------|
 | `persona` | Voice persona code | Config default | Any discovered persona |
 | `speed` | Speech speed multiplier | `1.0` | 0.25 – 4.0 |
-| `format` | Audio format | `mp3` | mp3, wav, opus, flac, pcm |
+| `format` | Audio format | `mp3` | mp3, wav, opus, flac |
 | `volume_multiplier` | Volume multiplier | `1.0` | Any positive float |
+
+---
+
+## 📄 Licence
+
+Licensed under [CC BY-NC-SA 4.0](LICENSE), matching the upstream project
+[beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) this fork is based on.
 
 ---
 

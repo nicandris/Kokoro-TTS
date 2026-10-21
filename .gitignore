@@ -96,3 +96,6 @@ Desktop.ini
 # Local dev/test
 *.local
 *.log
+
+# Editor settings
+.vscode/
