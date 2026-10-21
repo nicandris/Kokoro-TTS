@@ -23,7 +23,7 @@
 - Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one (`jf_alpha` / `hf_alpha` both show as "Alpha"); blended voices survive an accent-filter change.
 - Configurable **default volume** in the setup menu, applied to streaming as well.
 - The entity advertises every language Kokoro speaks, and defaults to the configured voice's own language.
-- A unit-test suite that runs without Home Assistant installed, plus CI on Python 3.13 / 3.14.
+- A unit-test suite that runs without Home Assistant installed, plus CI against the minimum supported Home Assistant (2025.8) and the latest release.
 
 See the [changelog](CHANGELOG.md) for the full list of changes — upstream is welcome to take any of it. (The old per-change upstream map, `DIVERSION.md`, was retired in 2026.10.21; it is in git history.)
 
