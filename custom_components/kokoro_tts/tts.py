@@ -159,6 +159,19 @@ class KokoroTTSEntity(TextToSpeechEntity):
             self._get_lang_code(persona) or "", DEFAULT_HA_LANGUAGE
         )
         self._attr_supported_options = SUPPORTED_OPTIONS
+        # HA hashes the merged options into its TTS cache key; without these
+        # defaults a changed voice/speed/format kept replaying the old audio.
+        # The voice goes under "voice" so a pipeline's own voice replaces it.
+        self._attr_default_options = {
+            key: value
+            for key, value in (
+                ("voice", persona),
+                ("speed", speed),
+                ("format", fmt),
+                ("volume_multiplier", volume_multiplier),
+            )
+            if value is not None
+        }
 
     @staticmethod
     def _handle_http_error(status: int, text: str) -> str:

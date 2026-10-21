@@ -114,3 +114,22 @@ def test_supported_voices_puts_configured_persona_first():
 
 def test_supported_voices_none_for_unknown_language():
     assert _entity().async_get_supported_voices("de") is None
+
+
+def test_default_options_feed_the_cache_key():
+    # HA hashes default_options merged with per-call options into the cache
+    # key; a different voice/speed/format must give a different key.
+    a = _entity(persona="af_heart", speed=1.0, fmt="mp3")._attr_default_options
+    assert a == {"voice": "af_heart", "speed": 1.0, "format": "mp3", "volume_multiplier": 1.0}
+    assert _entity(persona="am_adam")._attr_default_options != a
+    assert _entity(speed=1.5)._attr_default_options != a
+    assert _entity(fmt="wav")._attr_default_options != a
+
+
+def test_pipeline_voice_overrides_default_voice():
+    # HA merges a pipeline's "voice" over default_options["voice"].
+    entity = _entity(persona="af_heart")
+    merged = {**entity._attr_default_options, "voice": "jf_alpha"}
+    assert entity._resolve_options(merged)["persona"] == "jf_alpha"
+    # An explicit per-call persona still wins.
+    assert entity._resolve_options({**merged, "persona": "bf_emma"})["persona"] == "bf_emma"
