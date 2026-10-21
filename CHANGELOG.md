@@ -2,6 +2,47 @@
 
 Newest changes first. This integration is a fork of [beecho01/Kokoro-TTS](https://github.com/beecho01/Kokoro-TTS) (baseline **2026.05.23**).
 
+## 2026.10.21 — Review fixes
+
+Fixed:
+
+- Changing the voice, speed, format or volume no longer replays old cached audio:
+  the entity now sets `default_options`, which Home Assistant hashes into its TTS
+  cache key.
+- A plain `tts.speak` (and a short Assist reply) is synthesised in **one request in
+  the configured format** again. Home Assistant sends every request of a
+  streaming-capable entity through the streaming path, so `wav`/`flac` were being
+  forced to `mp3`; only a real streamed reply now goes per sentence.
+- The voice's own language decides `lang_code` (a Japanese voice no longer gets
+  English phonemes under an English accent filter), then the request language, then
+  the filter; an unknown letter is never sent.
+- An HTTP 401 during speech now actually starts reauth.
+- Reconfigure moves the entry's unique ID to the new URL, and every change reloads
+  the entry once (options use `OptionsFlowWithReload`; the update listener is gone).
+- Streaming keeps "Dr. Smith" and "1." list items in one sentence, splits Chinese/
+  Japanese punctuation and newline lists, and synthesises the next sentence while
+  the current one plays.
+- `pcm` is served as `wav` (headerless pcm was unplayable and unconvertible).
+- The Assist voice picker lists the server's own voices and puts a configured blend
+  or server-only voice first.
+- Each server gets a device and an entity named after its entry, not `tts.kokoro_2`.
+- Every failure is a `HomeAssistantError`; empty audio, a URL with `user:pw@`, and
+  oversized responses are refused; the API key field is masked, and a key over
+  plain `http://` is warned about.
+
+Changed:
+
+- Setup asks `/v1/models` once and uses Home Assistant's shared HTTP session.
+- Removed the unreachable JSON `audio`/`download_url` response handling, the dead
+  YAML import step, the read-only `sample_rate` field, `DIVERSION.md` and stale
+  editor/agent files.
+- README, manifest and HACS links point at this fork (`nicandris/Kokoro-TTS`), and
+  the config-flow badge uses the real domain `kokoro_tts`.
+- Licence aligned with upstream: CC BY-NC-SA 4.0.
+- CI: actions pinned, read-only permissions, release only from `main`, pinned test
+  dependencies, and the suite runs against Home Assistant 2025.8 (the minimum) as
+  well as the latest release.
+
 ## 2026.10.13 — Reconfigure
 
 - The integration's ⋮ menu now has **Reconfigure**: change the server URL or API key
