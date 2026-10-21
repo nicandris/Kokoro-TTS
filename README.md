@@ -230,7 +230,7 @@ The same syntax works for the per-call `persona` option (see [Per-call option ov
 
 Each server's entity is named after its entry, e.g. `tts.kokoro_tts_kitchen` for
 "Kokoro TTS (kitchen)"; an entity created before 2026.10.21 keeps its old id
-(`tts.kokoro`). The examples below use `tts.kokoro` — substitute yours.
+(`tts.kokoro`, `tts.kokoro_2`). The examples below use `tts.kokoro` — substitute yours.
 
 **Triggered action**
 

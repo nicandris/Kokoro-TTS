@@ -183,16 +183,16 @@ async def test_refresh_voices_uses_shared_session(monkeypatch):
     assert entity._server_voices == ["af_brandnew"]
 
 
-def test_entity_is_named_after_a_per_entry_device():
-    # Regression: no has_entity_name/device_info, so a second server became
-    # tts.kokoro_2 instead of being named after its entry.
+def test_entity_is_named_after_its_entry_on_a_per_entry_device():
+    # A None name makes HA's TTS manager refuse every message
+    # ("TTS engine name is not set"), so the name must always be a string.
     class _Entry:
         entry_id = "entry-9"
         title = "Kokoro TTS (kitchen)"
 
     entity = _entity(config_entry=_Entry())
-    assert entity._attr_has_entity_name is True
-    assert entity._attr_name is None
+    assert entity.name == "Kokoro TTS (kitchen)"
+    assert isinstance(_entity().name, str) and _entity().name
     info = entity._attr_device_info
     assert info["identifiers"] == {("kokoro_tts", "entry-9")}
     assert info["name"] == "Kokoro TTS (kitchen)"

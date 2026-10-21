@@ -190,10 +190,11 @@ class KokoroTTSEntity(TextToSpeechEntity):
         self._config_entry = config_entry
         # Filled by async_refresh_voices; the built-in list is used meanwhile.
         self._server_voices: list[str] = []
-        # Named after a per-entry service device, so two servers get distinct
-        # entity ids from their titles instead of tts.kokoro / tts.kokoro_2.
-        self._attr_has_entity_name = True
-        self._attr_name = None
+        # Named after the entry, on a per-entry service device. No
+        # has_entity_name: HA's TTS manager refuses an engine whose name is
+        # None. Existing entity ids (tts.kokoro, tts.kokoro_2) are kept by the
+        # registry; new ones follow the entry title.
+        self._attr_name = config_entry.title if config_entry is not None else "kokoro"
         if config_entry is not None:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, config_entry.entry_id)},

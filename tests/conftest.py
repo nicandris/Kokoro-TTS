@@ -125,8 +125,15 @@ def _stub_homeassistant() -> None:
     tts_entity = _mod("homeassistant.components.tts.entity")
 
     class TextToSpeechEntity:
+        _attr_name = None
+
         def __init__(self, *args, **kwargs):
             pass
+
+        @property
+        def name(self):
+            # Mirrors Entity.name without has_entity_name.
+            return self._attr_name
 
     # Field names, order and required-ness mirror homeassistant.components.tts
     # .entity exactly. Keep them in sync: a looser stub silently accepts calls
