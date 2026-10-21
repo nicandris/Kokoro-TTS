@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import asyncio
 import aiohttp
 import logging
 import re
@@ -63,14 +64,36 @@ STREAM_CHUNK_BYTES = 4096
 # Upper bound on one response body (about 9 minutes of 24 kHz 16-bit wav).
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
-# A sentence ends on terminal punctuation followed by whitespace. Requiring the
-# trailing whitespace keeps decimals ("12.5") and mid-generation abbreviations
-# from being treated as sentence boundaries.
 # Kokoro voice codes are "<lang><sex>_<name>"; a blend starts with one.
 VOICE_PREFIX_PATTERN = re.compile(r"([a-z])[fm]_")
 HA_LOCALE_TO_LANG_CODE = {locale: code for code, locale in LANG_CODE_TO_HA_LOCALE.items()}
 
-SENTENCE_END_PATTERN = re.compile(r"[.!?…]+[\"'”’)\]]*\s+")
+# A boundary is Latin terminal punctuation followed by whitespace (so "12.5"
+# never splits), CJK terminal punctuation (no space follows it), or a line
+# break (list items often carry no punctuation at all).
+SENTENCE_END_PATTERN = re.compile(
+    r"[.!?…]+[\"'”’)\]]*\s+|[。！？]+[」』”’)\]]*\s*|\n+"
+)
+
+# Words a "." follows without ending the sentence ("Dr. Smith").
+ABBREVIATIONS = frozenset(
+    {"dr", "mr", "mrs", "ms", "prof", "st", "jr", "sr", "vs", "etc", "e.g", "i.e", "mt", "fig"}
+)
+
+
+def _dot_ends_sentence(segment: str) -> bool:
+    """False when the "." closing `segment` is an abbreviation or list number."""
+    words = segment.split()
+    if not words:
+        return False
+    last = words[-1].lower()
+    if last in ABBREVIATIONS:
+        return False
+    # "1." opening a numbered item (alone or after "Steps:"), or an initial
+    # as in "J. Smith".
+    if last.isdigit() and (len(words) == 1 or words[-2].endswith(":")):
+        return False
+    return not (len(last) == 1 and last.isalpha())
 
 
 def split_sentences(buffer: str) -> tuple[list[str], str]:
@@ -82,6 +105,11 @@ def split_sentences(buffer: str) -> tuple[list[str], str]:
     sentences: list[str] = []
     last_end = 0
     for match in SENTENCE_END_PATTERN.finditer(buffer):
+        punctuation = match.group().rstrip()
+        if punctuation == "." and not _dot_ends_sentence(
+            buffer[last_end : match.start()]
+        ):
+            continue
         sentence = buffer[last_end : match.end()].strip()
         if sentence:
             sentences.append(sentence)
@@ -429,32 +457,65 @@ class KokoroTTSEntity(TextToSpeechEntity):
     async def _async_stream_audio(
         self, message_gen: AsyncGenerator[str], resolved: dict[str, Any]
     ) -> AsyncGenerator[bytes]:
-        """Consume the text stream and yield audio for each complete sentence."""
+        """Consume the text stream and yield audio for each complete sentence.
+
+        Looks ahead one sentence: the next one is synthesised while the current
+        one's audio is still being yielded, instead of strictly in sequence.
+        """
         # Reuse Home Assistant's shared session; the timeout is per-request.
         # No total timeout: the stream lives as long as the agent is talking.
         session = async_get_clientsession(self.hass)
         timeout = aiohttp.ClientTimeout(total=None, connect=10, sock_read=60)
-        sentence_count = 0
+        # Two slots: the sentence being played plus one synthesising ahead.
+        slots = asyncio.Semaphore(2)
+        jobs: asyncio.Queue[tuple[asyncio.Task, asyncio.Queue] | None] = asyncio.Queue()
+        fetches: list[asyncio.Task] = []
 
-        buffer = ""
-        async for chunk in message_gen:
-            buffer += chunk
-            sentences, buffer = split_sentences(buffer)
-            for sentence in sentences:
-                sentence_count += 1
+        async def fetch(sentence: str, chunks: asyncio.Queue) -> None:
+            try:
                 async for audio in self._async_stream_sentence(
                     session, sentence, resolved, timeout
                 ):
-                    yield audio
+                    chunks.put_nowait(audio)
+            finally:
+                chunks.put_nowait(None)
 
-        # Flush the tail: the last sentence often has no trailing whitespace.
-        tail = buffer.strip()
-        if tail:
-            sentence_count += 1
-            async for audio in self._async_stream_sentence(
-                session, tail, resolved, timeout
-            ):
-                yield audio
+        async def schedule(sentence: str) -> None:
+            await slots.acquire()
+            chunks: asyncio.Queue = asyncio.Queue()
+            task = asyncio.create_task(fetch(sentence, chunks))
+            fetches.append(task)
+            jobs.put_nowait((task, chunks))
+
+        async def read_text() -> None:
+            try:
+                buffer = ""
+                async for chunk in message_gen:
+                    buffer += chunk
+                    sentences, buffer = split_sentences(buffer)
+                    for sentence in sentences:
+                        await schedule(sentence)
+                # Flush the tail: the last sentence often has no trailing space.
+                if tail := buffer.strip():
+                    await schedule(tail)
+            finally:
+                jobs.put_nowait(None)
+
+        reader = asyncio.create_task(read_text())
+        sentence_count = 0
+        try:
+            while (job := await jobs.get()) is not None:
+                task, chunks = job
+                while (audio := await chunks.get()) is not None:
+                    yield audio
+                await task  # surfaces a failed request
+                slots.release()
+                sentence_count += 1
+            await reader  # surfaces a failed text stream
+        finally:
+            reader.cancel()
+            for task in fetches:
+                task.cancel()
 
         _LOGGER.debug(
             "TTS stream complete: %d sentence(s), format: %s",

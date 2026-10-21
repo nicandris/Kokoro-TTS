@@ -280,3 +280,46 @@ async def test_real_stream_still_goes_per_sentence(monkeypatch):
 
     assert response.extension == "mp3"
     assert session.messages == ["One.", "Two."]
+
+
+def test_split_sentences_keeps_abbreviations_and_list_numbers():
+    sentences, remainder = split_sentences("Ask Dr. Smith today. Steps: 1. Mix it. 2. Bake it. ")
+    assert sentences == ["Ask Dr. Smith today.", "Steps: 1. Mix it.", "2. Bake it."]
+    assert remainder == ""
+
+
+def test_split_sentences_splits_cjk_and_newline_lists():
+    sentences, remainder = split_sentences("今日は晴れです。明日は雨！- milk\n- eggs\nbread")
+    assert sentences == ["今日は晴れです。", "明日は雨！", "- milk", "- eggs"]
+    assert remainder == "bread"
+
+
+async def test_stream_synthesises_next_sentence_while_current_plays(monkeypatch):
+    # Regression: sentences were synthesised strictly in sequence. Sentence 1's
+    # audio only arrives once sentence 2's request has been sent.
+    import asyncio
+
+    second_posted = asyncio.Event()
+
+    class _GatedContent:
+        async def iter_chunked(self, size):
+            await second_posted.wait()
+            yield b"ONE"
+
+    class _Session(_RecordingSession):
+        def post(self, url, **kwargs):
+            response = super().post(url, **kwargs)
+            if len(self.posts) == 1:
+                response.content = _GatedContent()
+            else:
+                second_posted.set()
+            return response
+
+    session = _Session()
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: session)
+
+    _response, audio = await asyncio.wait_for(
+        _drain(_entity(), ["One. ", "Two. ", "Three."]), timeout=2
+    )
+    assert audio == b"ONE" + b"AUDIO" * 2
+    assert session.messages == ["One.", "Two.", "Three."]
