@@ -21,6 +21,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .api import async_fetch_voices
+from .config_flow import derive_persona_info
 from .const import (
     CONF_BASE_URL,
     CONF_API_KEY,
@@ -158,6 +160,10 @@ async def async_setup_entry(
         config_entry=config_entry,
     )
     async_add_entities([entity])
+    # Best effort, off the setup path: list the server's own voices too.
+    config_entry.async_create_background_task(
+        hass, entity.async_refresh_voices(), "kokoro_tts voice discovery"
+    )
 
 
 class KokoroTTSEntity(TextToSpeechEntity):
@@ -180,6 +186,8 @@ class KokoroTTSEntity(TextToSpeechEntity):
         """Initialize the TTS entity."""
         super().__init__()
         self._config_entry = config_entry
+        # Filled by async_refresh_voices; the built-in list is used meanwhile.
+        self._server_voices: list[str] = []
         self._attr_name = name
         # Tie the unique_id to the config entry so multiple servers don't collide.
         self._attr_unique_id = unique_id
@@ -284,15 +292,33 @@ class KokoroTTSEntity(TextToSpeechEntity):
         voice in this list, which would otherwise be whichever sorts first
         ("Adam") instead of the voice chosen in this integration's options.
         """
-        voices = sorted(
-            (
-                Voice(code, display_name)
-                for code, (lang, _sex, display_name) in PERSONA_MAPPINGS.items()
-                if LANGUAGE_HA_CODE_MAP.get(lang) == language
-            ),
+        voices = {
+            code: display_name
+            for code, (lang, _sex, display_name) in PERSONA_MAPPINGS.items()
+            if LANGUAGE_HA_CODE_MAP.get(lang) == language
+        }
+        # Server-only voices, and the configured one even when it is a blend
+        # or unknown code - otherwise it is never first and HA picks another.
+        for code in [*self._server_voices, self._persona]:
+            if not code or code in voices:
+                continue
+            info = PERSONA_MAPPINGS.get(code) or derive_persona_info(code)
+            if info is not None:
+                if LANGUAGE_HA_CODE_MAP.get(info[0]) == language:
+                    voices[code] = info[2]
+            elif code == self._persona and language == self._attr_default_language:
+                voices[code] = code
+        ordered = sorted(
+            (Voice(code, name) for code, name in voices.items()),
             key=lambda voice: (voice.voice_id != self._persona, voice.name),
         )
-        return voices or None
+        return ordered or None
+
+    async def async_refresh_voices(self) -> None:
+        """Fetch the voices the server reports, for the pipeline voice picker."""
+        self._server_voices = await async_fetch_voices(
+            async_get_clientsession(self.hass), self._base_url, self._api_key
+        )
 
     def _resolve_options(
         self, options: dict[str, Any] | None, language: str | None = None

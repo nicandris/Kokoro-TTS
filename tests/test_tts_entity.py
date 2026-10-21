@@ -150,3 +150,35 @@ def test_pipeline_voice_overrides_default_voice():
     assert entity._resolve_options(merged)["persona"] == "jf_alpha"
     # An explicit per-call persona still wins.
     assert entity._resolve_options({**merged, "persona": "bf_emma"})["persona"] == "bf_emma"
+
+
+def test_supported_voices_put_a_configured_blend_first():
+    # Regression: a blend is not in the static list, so Assist got "Adam".
+    voices = _entity(persona="af_bella+af_sky").async_get_supported_voices("en")
+    assert voices[0].voice_id == "af_bella+af_sky"
+    # Not offered under an unrelated language.
+    assert "af_bella+af_sky" not in [v.voice_id for v in _entity(persona="af_bella+af_sky").async_get_supported_voices("ja")]
+
+
+def test_supported_voices_include_server_only_voices():
+    entity = _entity(persona="af_brandnew")
+    entity._server_voices = ["af_brandnew", "jf_newvoice", "weird"]
+    en = [v.voice_id for v in entity.async_get_supported_voices("en")]
+    assert en[0] == "af_brandnew"
+    assert "jf_newvoice" in [v.voice_id for v in entity.async_get_supported_voices("ja")]
+    assert "weird" not in en
+
+
+async def test_refresh_voices_uses_shared_session(monkeypatch):
+    from custom_components.kokoro_tts import tts
+
+    async def _fake_fetch(session, base_url, api_key):
+        assert session == "shared"
+        return ["af_brandnew"]
+
+    monkeypatch.setattr(tts, "async_get_clientsession", lambda hass: "shared")
+    monkeypatch.setattr(tts, "async_fetch_voices", _fake_fetch)
+    entity = _entity()
+    entity.hass = object()
+    await entity.async_refresh_voices()
+    assert entity._server_voices == ["af_brandnew"]
