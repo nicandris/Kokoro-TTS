@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 from typing import Any
-import asyncio
 import hashlib
 import logging
 from urllib.parse import urlparse
 
-import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .api import async_fetch_models, async_fetch_voices
 
 from .const import (
     CONF_API_KEY,
@@ -30,7 +31,6 @@ from .const import (
     LANGUAGE_OPTIONS,
     PERSONA_MAPPINGS,
     SEX_OPTIONS,
-    auth_headers,
 )
 
 # Reverse of LANGUAGE_CODE_MAP: first-letter code -> language display name.
@@ -158,93 +158,11 @@ def get_persona_select_options(
 # API discovery
 # ---------------------------------------------------------------------------
 
-async def _discover_models_and_personas(
-    base_url: str, api_key: str
-) -> tuple[list[str], list[str]]:
-    """Discover models and personas from Kokoro API endpoints."""
-    headers = auth_headers(api_key)
-
-    models: list[str] = []
-    personas: list[str] = []
-    timeout = aiohttp.ClientTimeout(total=8)
-
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            # Discover models from /v1/models
-            try:
-                async with session.get(f"{base_url}/v1/models", headers=headers) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if isinstance(data, dict) and isinstance(data.get("data"), list):
-                            models = [
-                                str(item.get("id"))
-                                for item in data["data"]
-                                if isinstance(item, dict) and item.get("id")
-                            ]
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                _LOGGER.debug("Failed to discover models from %s/v1/models", base_url)
-
-            # Discover personas from /v1/audio/voices
-            try:
-                async with session.get(
-                    f"{base_url}/v1/audio/voices", headers=headers
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if isinstance(data, dict):
-                            voices = data.get("voices", data.get("personas", []))
-                        elif isinstance(data, list):
-                            voices = data
-                        else:
-                            voices = []
-
-                        for voice in voices:
-                            if isinstance(voice, str):
-                                personas.append(voice)
-                            elif isinstance(voice, dict) and voice.get("id"):
-                                personas.append(str(voice["id"]))
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
-                _LOGGER.debug("Failed to discover personas from %s/v1/audio/voices", base_url)
-    except (aiohttp.ClientError, asyncio.TimeoutError):
-        _LOGGER.debug("Error in discovery session for %s", base_url)
-
-    # Fallback to static mappings if API discovery failed
-    if not personas:
-        personas = list(PERSONA_MAPPINGS.keys())
-    if not models:
-        models = ["kokoro"]
-
-    return models, personas
-
-
-async def _test_connection(base_url: str, api_key: str) -> dict[str, str]:
-    """Test connection to the Kokoro FastAPI server.
-
-    Returns a dict of errors (empty dict = success).
-    """
-    headers = auth_headers(api_key)
-
-    timeout = aiohttp.ClientTimeout(total=10, connect=5)
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            try:
-                async with session.get(f"{base_url}/v1/models", headers=headers) as resp:
-                    if resp.status == 401:
-                        return {CONF_API_KEY: "auth_failed"}
-                    if resp.status == 404:
-                        return {CONF_BASE_URL: "server_not_found"}
-                    if resp.status >= 500:
-                        return {CONF_BASE_URL: "server_error"}
-                    # 200 or other - server is reachable
-            except aiohttp.ClientSSLError:
-                return {CONF_BASE_URL: "ssl_error"}
-            except aiohttp.ClientConnectorError:
-                return {CONF_BASE_URL: "cannot_connect"}
-            except asyncio.TimeoutError:
-                return {CONF_BASE_URL: "timeout"}
-    except (aiohttp.ClientError, asyncio.TimeoutError):
-        return {CONF_BASE_URL: "cannot_connect"}
-    return {}
+async def _discover_voices(session, base_url: str, api_key: str) -> list[str]:
+    """Server-reported voices, or the built-in list when discovery fails."""
+    return await async_fetch_voices(session, base_url, api_key) or list(
+        PERSONA_MAPPINGS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -411,10 +329,55 @@ def _persona_schema(
 
 
 # ---------------------------------------------------------------------------
-# Config Flow
+# Flows
 # ---------------------------------------------------------------------------
 
-class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class _VoiceStepsMixin:
+    """Filter + persona step handling shared by the config and options flows."""
+
+    _filters: dict[str, Any]
+    _persona_prefill: dict[str, Any]
+
+    def _store_filters(self, user_input: dict) -> None:
+        self._filters = {
+            key: user_input.get(key, DEFAULTS[key])
+            for key in (CONF_MODEL, CONF_LANGUAGE, CONF_SEX)
+        }
+
+    def _selected_filters(self) -> tuple[str, str]:
+        return (
+            self._filters.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
+            self._filters.get(CONF_SEX, DEFAULTS[CONF_SEX]),
+        )
+
+    async def _async_check_persona_input(
+        self, user_input: dict, personas: list[str], back_step
+    ):
+        """Return the next flow result for persona-step input, or None if valid."""
+        if user_input.pop(CONF_CHANGE_FILTERS, False):
+            # Keep whatever speed/format/volume the user already set; the
+            # persona itself is dropped, since it may not match whatever
+            # accent/sex they pick next.
+            self._persona_prefill = {
+                k: v for k, v in user_input.items() if k != CONF_PERSONA
+            }
+            return await back_step()
+
+        selected_persona = user_input.get(CONF_PERSONA)
+        if not selected_persona or not str(selected_persona).strip():
+            return self.async_show_form(
+                step_id="persona",
+                data_schema=_persona_schema(
+                    personas, *self._selected_filters(), user_input
+                ),
+                errors={CONF_PERSONA: "persona_required"},
+            )
+        # CONF_PERSONA is already the technical code (the selector option
+        # value), so no display-name reverse-mapping is needed.
+        return None
+
+
+class KokoroConfigFlow(_VoiceStepsMixin, config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Kokoro TTS with dynamic discovery."""
 
     VERSION = 1
@@ -432,27 +395,28 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow."""
         return KokoroOptionsFlow()
 
+    async def _async_check_server(self, base_url: str, api_key: str) -> dict[str, str]:
+        """Test the server, keeping its model list for the filters step."""
+        errors, models = await async_fetch_models(
+            async_get_clientsession(self.hass), base_url, api_key
+        )
+        if not errors:
+            self._discovered["models"] = models or [DEFAULTS[CONF_MODEL]]
+        return errors
+
     async def async_step_user(self, user_input: dict | None = None):
         """Handle base connection step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             base = (user_input.get(CONF_BASE_URL) or "").strip().rstrip("/")
-
-            errors = _validate_base_url(base)
-
+            api_key = user_input.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
+            errors = _validate_base_url(base) or await self._async_check_server(
+                base, api_key
+            )
             if not errors:
-                # Test connection to the server
-                api_key = user_input.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-                conn_errors = await _test_connection(base, api_key)
-                if conn_errors:
-                    errors.update(conn_errors)
-                else:
-                    self._base_info = {
-                        CONF_BASE_URL: base,
-                        CONF_API_KEY: api_key,
-                    }
-                    return await self.async_step_filters()
+                self._base_info = {CONF_BASE_URL: base, CONF_API_KEY: api_key}
+                return await self.async_step_filters()
 
         return self.async_show_form(
             step_id="user", data_schema=_base_schema(user_input), errors=errors
@@ -460,74 +424,47 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_filters(self, user_input: dict | None = None):
         """Handle model/accent/sex filter selection with dynamic discovery."""
-        base_url = self._base_info[CONF_BASE_URL]
-        api_key = self._base_info.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-
-        # Discover models and personas if not cached
-        if "models" not in self._discovered:
-            models, personas = await _discover_models_and_personas(base_url, api_key)
-            self._discovered = {"models": models, "personas": personas}
-        else:
-            models = self._discovered["models"]
+        if "personas" not in self._discovered:
+            self._discovered["personas"] = await _discover_voices(
+                async_get_clientsession(self.hass),
+                self._base_info[CONF_BASE_URL],
+                self._base_info.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY]),
+            )
 
         if user_input is not None:
-            self._filters = {
-                CONF_MODEL: user_input.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
-                CONF_LANGUAGE: user_input.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
-                CONF_SEX: user_input.get(CONF_SEX, DEFAULTS[CONF_SEX]),
-            }
+            self._store_filters(user_input)
             return await self.async_step_persona()
 
         # Pre-fill from the last-submitted filters (e.g. when the user comes
         # back here via the persona step's "Change Voice Accent / Sex").
         return self.async_show_form(
-            step_id="filters", data_schema=_filters_schema(models, self._filters)
+            step_id="filters",
+            data_schema=_filters_schema(
+                self._discovered.get("models", []), self._filters
+            ),
         )
 
     async def async_step_persona(self, user_input: dict | None = None):
         """Handle persona and audio settings, filtered by the previous step."""
         personas = self._discovered.get("personas", [])
-        selected_language = self._filters.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
-        selected_sex = self._filters.get(CONF_SEX, DEFAULTS[CONF_SEX])
 
         if user_input is not None:
-            if user_input.pop(CONF_CHANGE_FILTERS, False):
-                # Keep whatever speed/format/volume the user already set;
-                # the persona itself is dropped, since it may not match
-                # whatever accent/sex they pick next.
-                self._persona_prefill = {
-                    k: v for k, v in user_input.items() if k != CONF_PERSONA
-                }
-                return await self.async_step_filters()
+            if result := await self._async_check_persona_input(
+                user_input, personas, self.async_step_filters
+            ):
+                return result
 
-            # Validate persona selection
-            selected_persona = user_input.get(CONF_PERSONA)
-            if not selected_persona or not str(selected_persona).strip():
-                return self.async_show_form(
-                    step_id="persona",
-                    data_schema=_persona_schema(
-                        personas, selected_language, selected_sex, user_input
-                    ),
-                    errors={CONF_PERSONA: "persona_required"},
-                )
-
-            # CONF_PERSONA is already the technical code (the selector option
-            # value), so no display-name reverse-mapping is needed.
             # Merge base info, filters and persona/audio settings.
             data = {**self._base_info, **self._filters, **user_input}
-
-            # Create entry with unique ID
             base_url = self._base_info[CONF_BASE_URL]
-            unique_id = _calc_unique_id(base_url)
-            await self.async_set_unique_id(unique_id)
+            await self.async_set_unique_id(_calc_unique_id(base_url))
             self._abort_if_unique_id_configured()
-
             return self.async_create_entry(title=_entry_title(base_url), data=data)
 
         return self.async_show_form(
             step_id="persona",
             data_schema=_persona_schema(
-                personas, selected_language, selected_sex, self._persona_prefill
+                personas, *self._selected_filters(), self._persona_prefill
             ),
         )
 
@@ -543,7 +480,9 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             base = (user_input.get(CONF_BASE_URL) or "").strip().rstrip("/")
             api_key = user_input.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-            errors = _validate_base_url(base) or await _test_connection(base, api_key)
+            errors = _validate_base_url(base) or await self._async_check_server(
+                base, api_key
+            )
             if not errors:
                 new_id = _calc_unique_id(base)
                 if any(
@@ -584,11 +523,10 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             api_key = user_input.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-            base_url = self._base_info[CONF_BASE_URL]
-            conn_errors = await _test_connection(base_url, api_key)
-            if conn_errors:
-                errors.update(conn_errors)
-            else:
+            errors = await self._async_check_server(
+                self._base_info[CONF_BASE_URL], api_key
+            )
+            if not errors:
                 return self.async_update_reload_and_abort(
                     self._get_reauth_entry(), data_updates={CONF_API_KEY: api_key}
                 )
@@ -603,24 +541,8 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_import(self, user_input: dict):
-        """Support YAML import."""
-        base = (user_input.get(CONF_BASE_URL) or "").strip().rstrip("/")
-        if not base:
-            return self.async_abort(reason="base_url_required")
 
-        unique_id = _calc_unique_id(base)
-        await self.async_set_unique_id(unique_id)
-        self._abort_if_unique_id_configured()
-
-        return self.async_create_entry(title=_entry_title(base), data=user_input)
-
-
-# ---------------------------------------------------------------------------
-# Options Flow
-# ---------------------------------------------------------------------------
-
-class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
+class KokoroOptionsFlow(_VoiceStepsMixin, config_entries.OptionsFlowWithReload):
     """Handle options flow for Kokoro TTS; saving reloads the entry once."""
 
     def __init__(self) -> None:
@@ -636,15 +558,14 @@ class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
     async def _async_discover(self) -> tuple[list[str], list[str]]:
         """Discover models/personas once per flow session, cached."""
         if "models" not in self._discovered:
+            session = async_get_clientsession(self.hass)
             base_url = self.config_entry.data[CONF_BASE_URL]
             api_key = self.config_entry.data.get(CONF_API_KEY, DEFAULTS[CONF_API_KEY])
-            models: list[str] = []
-            personas: list[str] = []
-            try:
-                models, personas = await _discover_models_and_personas(base_url, api_key)
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                _LOGGER.debug("Discovery failed for %s, falling back", base_url)
-            self._discovered = {"models": models, "personas": personas}
+            _errors, models = await async_fetch_models(session, base_url, api_key)
+            self._discovered = {
+                "models": models or [DEFAULTS[CONF_MODEL]],
+                "personas": await _discover_voices(session, base_url, api_key),
+            }
         return self._discovered["models"], self._discovered["personas"]
 
     async def async_step_init(self, user_input: dict | None = None):
@@ -652,11 +573,7 @@ class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
         models, _personas = await self._async_discover()
 
         if user_input is not None:
-            self._filters = {
-                CONF_MODEL: user_input.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
-                CONF_LANGUAGE: user_input.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
-                CONF_SEX: user_input.get(CONF_SEX, DEFAULTS[CONF_SEX]),
-            }
+            self._store_filters(user_input)
             return await self.async_step_persona()
 
         # Pre-fill from the in-session filters if we're back here via the
@@ -667,9 +584,8 @@ class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
         else:
             data = {**self.config_entry.data, **(self.config_entry.options or {})}
             prefill = {
-                CONF_MODEL: data.get(CONF_MODEL, DEFAULTS[CONF_MODEL]),
-                CONF_LANGUAGE: data.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE]),
-                CONF_SEX: data.get(CONF_SEX, DEFAULTS[CONF_SEX]),
+                key: data.get(key, DEFAULTS[key])
+                for key in (CONF_MODEL, CONF_LANGUAGE, CONF_SEX)
             }
         return self.async_show_form(
             step_id="init", data_schema=_filters_schema(models, prefill)
@@ -678,32 +594,13 @@ class KokoroOptionsFlow(config_entries.OptionsFlowWithReload):
     async def async_step_persona(self, user_input: dict | None = None):
         """Handle persona and audio settings, filtered by the previous step."""
         _models, personas = await self._async_discover()
-        selected_language = self._filters.get(CONF_LANGUAGE, DEFAULTS[CONF_LANGUAGE])
-        selected_sex = self._filters.get(CONF_SEX, DEFAULTS[CONF_SEX])
+        selected_language, selected_sex = self._selected_filters()
 
         if user_input is not None:
-            if user_input.pop(CONF_CHANGE_FILTERS, False):
-                # Keep whatever speed/format/volume the user already set;
-                # the persona itself is dropped, since it may not match
-                # whatever accent/sex they pick next.
-                self._persona_prefill = {
-                    k: v for k, v in user_input.items() if k != CONF_PERSONA
-                }
-                return await self.async_step_init()
-
-            # Validate persona
-            selected_persona = user_input.get(CONF_PERSONA)
-            if not selected_persona or not str(selected_persona).strip():
-                return self.async_show_form(
-                    step_id="persona",
-                    data_schema=_persona_schema(
-                        personas, selected_language, selected_sex, user_input
-                    ),
-                    errors={CONF_PERSONA: "persona_required"},
-                )
-
-            # CONF_PERSONA is already the technical code (the selector option
-            # value), so no display-name reverse-mapping is needed.
+            if result := await self._async_check_persona_input(
+                user_input, personas, self.async_step_init
+            ):
+                return result
             return self.async_create_entry(title="", data={**self._filters, **user_input})
 
         # Pre-fill audio settings from the stored entry. Only pre-fill the

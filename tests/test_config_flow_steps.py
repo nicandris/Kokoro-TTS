@@ -36,10 +36,15 @@ PERSONAS = ["af_heart", "am_adam", "bf_emma", "jf_alpha", "hf_alpha", "af_brandn
 def _no_network(monkeypatch):
     """Discovery is exercised elsewhere; here it always succeeds instantly."""
 
-    async def _fake_discover(base_url, api_key):
-        return ["kokoro"], list(PERSONAS)
+    async def _fake_models(session, base_url, api_key):
+        return {}, ["kokoro"]
 
-    monkeypatch.setattr(cf, "_discover_models_and_personas", _fake_discover)
+    async def _fake_voices(session, base_url, api_key):
+        return list(PERSONAS)
+
+    monkeypatch.setattr(cf, "async_fetch_models", _fake_models)
+    monkeypatch.setattr(cf, "async_fetch_voices", _fake_voices)
+    monkeypatch.setattr(cf, "async_get_clientsession", lambda hass: None)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,8 @@ def _no_network(monkeypatch):
 # ---------------------------------------------------------------------------
 
 class _FlowRecorder:
+    hass = None
+
     def __init__(self):
         self.forms = []
         self.created = None
@@ -375,10 +382,10 @@ class _ReconfigureFlow(_FlowRecorder, KokoroConfigFlow):
 def _connection(monkeypatch):
     errors = {}
 
-    async def _fake_test(base_url, api_key):
-        return dict(errors)
+    async def _fake_models(session, base_url, api_key):
+        return dict(errors), ["kokoro"]
 
-    monkeypatch.setattr(cf, "_test_connection", _fake_test)
+    monkeypatch.setattr(cf, "async_fetch_models", _fake_models)
     return errors
 
 
@@ -431,3 +438,25 @@ async def test_reauth_saves_the_new_key_through_update_reload_and_abort(_connect
     result = await flow.async_step_reauth_confirm({CONF_API_KEY: "new-key"})
     assert result["reason"] == "reconfigure_successful"  # recorder's canned reply
     assert flow.updated == {"data_updates": {CONF_API_KEY: "new-key"}}
+
+
+async def test_setup_asks_the_server_for_models_once(monkeypatch):
+    # Regression: the connection test and discovery each hit /v1/models.
+    calls = []
+
+    async def _fake_models(session, base_url, api_key):
+        calls.append(base_url)
+        return {}, ["kokoro", "tts-1"]
+
+    monkeypatch.setattr(cf, "async_fetch_models", _fake_models)
+    flow = _ConfigFlow()
+    result = await flow.async_step_user({CONF_BASE_URL: "http://h:8880/", CONF_API_KEY: "x"})
+    assert result["step_id"] == "filters"
+    await flow.async_step_filters({CONF_LANGUAGE: "Japanese", CONF_SEX: "Female"})
+    assert calls == ["http://h:8880"]
+    assert flow._discovered["models"] == ["kokoro", "tts-1"]
+
+
+def test_yaml_import_step_is_gone():
+    # CONFIG_SCHEMA is config-entry-only, so the import step could never run.
+    assert not hasattr(KokoroConfigFlow, "async_step_import")
