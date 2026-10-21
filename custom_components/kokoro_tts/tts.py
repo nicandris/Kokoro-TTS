@@ -43,6 +43,7 @@ from .const import (
     PERSONA_MAPPINGS,
     STREAM_SAFE_FORMATS,
     SUPPORTED_LANGUAGES,
+    auth_headers,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -275,10 +276,7 @@ class KokoroTTSEntity(TextToSpeechEntity):
 
     def _build_headers(self) -> dict[str, str]:
         """Build the request headers, including auth when configured."""
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self._api_key and self._api_key not in ("x", "not-needed", ""):
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        return headers
+        return {"Content-Type": "application/json", **auth_headers(self._api_key)}
 
     @property
     def _speech_url(self) -> str:

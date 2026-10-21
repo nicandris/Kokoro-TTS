@@ -21,11 +21,11 @@
 
 - Options changes apply immediately — the TTS entity reloads (no restart), and a reauth that swaps the API key reloads it too; HTTP 401 triggers re-authentication on both the regular and streaming paths; Home Assistant's shared HTTP session is reused rather than opened per request.
 - Every voice your server reports is selectable (even ones not in the built-in list); voices that share a display name no longer map to the wrong one (`jf_alpha` / `hf_alpha` both show as "Alpha"); blended voices survive an accent-filter change.
-- Configurable **default volume** in the setup menu, applied to streaming as well; sample rate is shown read-only (Kokoro output is fixed at 24 kHz).
+- Configurable **default volume** in the setup menu, applied to streaming as well.
 - The entity advertises every language Kokoro speaks, and defaults to the configured voice's own language.
 - A unit-test suite that runs without Home Assistant installed, plus CI on Python 3.13 / 3.14.
 
-See the [changelog](CHANGELOG.md) for the full list of changes, and [DIVERSION.md](DIVERSION.md) for how each one maps back to upstream — upstream is welcome to take any of it.
+See the [changelog](CHANGELOG.md) for the full list of changes — upstream is welcome to take any of it. (The old per-change upstream map, `DIVERSION.md`, was retired in 2026.10.21; it is in git history.)
 
 <p align="center">
   <em>
@@ -119,7 +119,6 @@ The integration can be configured through Home Assistant's UI with automatic dis
 | `speed` | Speech speed multiplier | `1.0` | 0.25 - 4.0 |
 | `format` | Audio format | `"mp3"` | mp3, wav, opus, flac, pcm |
 | `volume_multiplier` | Default output volume multiplier | `1.0` | 0.1 – 5.0 |
-| `sample_rate` | Output sample rate — **read-only**, fixed by the server | `24000` | Fixed at 24000 Hz |
 
 ### 👨👩 Personas
 
@@ -212,7 +211,6 @@ The same syntax works for the per-call `persona` option (see [Per-call option ov
    - **Speed**: Playback speed (0.25x to 4.0x, default: 1.0)
    - **Format**: Audio format (mp3, wav, opus, flac, pcm)
    - **Default Volume**: Output volume multiplier (1.0 = unchanged; raise for louder TTS).
-   - **Sample Rate**: Read-only. Kokoro FastAPI always outputs 24000 Hz, so it can't be changed.
 
 > **Changing options?** Any changes made via `Settings` → `Devices & Services` → `Configure` take effect immediately — no Home Assistant restart is required.
 

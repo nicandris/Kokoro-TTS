@@ -1,5 +1,5 @@
 ﻿# --- Settings ---
-$BaseUrl        = "http://192.168.0.17:8880/v1/audio/speech"
+$BaseUrl        = "http://localhost:8880/v1/audio/speech"
 $OutDir         = $PSScriptRoot   # saves inside docs/audio
 $ResponseFormat = "wav"                     # request lossless from server
 $EncodeToMp3    = $true                     # convert WAV -> MP3 locally

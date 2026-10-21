@@ -21,17 +21,16 @@ from .const import (
     CONF_LANGUAGE,
     CONF_MODEL,
     CONF_PERSONA,
-    CONF_SAMPLE_RATE,
     CONF_SEX,
     CONF_SPEED,
     CONF_VOLUME_MULTIPLIER,
     DEFAULTS,
     DOMAIN,
-    FIXED_SAMPLE_RATE,
     LANGUAGE_CODE_MAP,
     LANGUAGE_OPTIONS,
     PERSONA_MAPPINGS,
     SEX_OPTIONS,
+    auth_headers,
 )
 
 # Reverse of LANGUAGE_CODE_MAP: first-letter code -> language display name.
@@ -163,9 +162,7 @@ async def _discover_models_and_personas(
     base_url: str, api_key: str
 ) -> tuple[list[str], list[str]]:
     """Discover models and personas from Kokoro API endpoints."""
-    headers: dict[str, str] = {}
-    if api_key and api_key not in ("x", "not-needed", ""):
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = auth_headers(api_key)
 
     models: list[str] = []
     personas: list[str] = []
@@ -225,9 +222,7 @@ async def _test_connection(base_url: str, api_key: str) -> dict[str, str]:
 
     Returns a dict of errors (empty dict = success).
     """
-    headers: dict[str, str] = {}
-    if api_key and api_key not in ("x", "not-needed", ""):
-        headers["Authorization"] = f"Bearer {api_key}"
+    headers = auth_headers(api_key)
 
     timeout = aiohttp.ClientTimeout(total=10, connect=5)
     try:
@@ -412,12 +407,6 @@ def _persona_schema(
         {"number": {"min": 0.1, "max": 5.0, "step": 0.1, "mode": "slider"}}
     )
 
-    # Sample rate: read-only. Kokoro FastAPI always outputs 24 kHz, so this is
-    # surfaced for transparency but cannot be changed (and is never sent).
-    schema[
-        vol.Optional(CONF_SAMPLE_RATE, default=str(FIXED_SAMPLE_RATE))
-    ] = selector.selector({"text": {"read_only": True}})
-
     return vol.Schema(schema)
 
 
@@ -503,7 +492,7 @@ class KokoroConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if user_input.pop(CONF_CHANGE_FILTERS, False):
-                # Keep whatever speed/format/sample_rate the user already set;
+                # Keep whatever speed/format/volume the user already set;
                 # the persona itself is dropped, since it may not match
                 # whatever accent/sex they pick next.
                 self._persona_prefill = {
@@ -707,7 +696,7 @@ class KokoroOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             if user_input.pop(CONF_CHANGE_FILTERS, False):
-                # Keep whatever speed/format/sample_rate the user already set;
+                # Keep whatever speed/format/volume the user already set;
                 # the persona itself is dropped, since it may not match
                 # whatever accent/sex they pick next.
                 self._persona_prefill = {
@@ -733,8 +722,6 @@ class KokoroOptionsFlow(config_entries.OptionsFlow):
         # Pre-fill audio settings from the stored entry. Only pre-fill the
         # persona itself if it still matches the filters just chosen -
         # otherwise leave it blank so the list forces an explicit pick.
-        # Sample rate is deliberately absent: it is read-only and always
-        # rendered from FIXED_SAMPLE_RATE by _persona_schema.
         data = {**self.config_entry.data, **(self.config_entry.options or {})}
         prefill: dict[str, Any] = {
             CONF_SPEED: data.get(CONF_SPEED, DEFAULTS[CONF_SPEED]),

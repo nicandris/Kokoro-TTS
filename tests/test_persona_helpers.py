@@ -110,3 +110,11 @@ def test_calc_unique_id_stable_and_distinct():
     assert first == _calc_unique_id("http://host:8880")
     assert len(first) == 12
     assert first != _calc_unique_id("http://other:8880")
+
+
+def test_auth_headers_only_for_a_real_key():
+    from custom_components.kokoro_tts.const import auth_headers
+
+    assert auth_headers("secret") == {"Authorization": "Bearer secret"}
+    for placeholder in (None, "", "x", "not-needed"):
+        assert auth_headers(placeholder) == {}
