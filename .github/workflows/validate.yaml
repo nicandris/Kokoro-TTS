@@ -18,3 +18,6 @@ jobs:
         uses: "hacs/action@d556e736723344f83838d08488c983a15381059a" # 22.5.0
         with:
           category: "integration"
+          # CC-BY-NC-SA-4.0 (K7, matches upstream) isn't on GitHub's license list, so the
+          # repo reports NOASSERTION and HACS's license check can never pass.
+          ignore: "license"
