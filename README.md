@@ -44,7 +44,7 @@ See the [changelog](CHANGELOG.md) for the full list of changes — upstream is w
 - [📑 Quick Links](#-quick-links)
 - [✨ Features](#-features)
 - [📦 Installation](#-installation)
-  - [HACS (recommended)](#hacs-recommended)
+  - [Install Integration via Marketplace (Previously known as HACS)](#install-integration-via-marketplace-previously-known-as-hacs)
   - [Manual](#manual)
 - [⚙️ Configuration](#️-configuration)
   - [Configuration Options](#configuration-options)
@@ -78,13 +78,13 @@ See the [changelog](CHANGELOG.md) for the full list of changes — upstream is w
 
 ## 📦 Installation
 
-### HACS (recommended)
+### Install Integration via Marketplace (Previously known as HACS)
 
-1. Go to `HACS` → `Integrations` → `Custom repositories`.  
+1. Go to `Marketplace` → `Integrations` → `Custom repositories`.  
 2. Add this repository: `https://github.com/nicandris/Kokoro-TTS` with category `Integration`.
-3. Either search for `Kokoro-TTS` in HACS or tap the below button:
+3. Either search for `Kokoro-TTS` in Marketplace or tap the below button:
    
-   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nicandris&repository=Kokoro-TTS)
+   [![Open your Home Assistant instance and open a repository inside the Marketplace.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=nicandris&repository=Kokoro-TTS)
 4. Tap `Download` and then `Install`.
 5. Then tap next setup quick-link below to complete the setup configuration:
    
